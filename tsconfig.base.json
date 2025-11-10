@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["bun-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@rx-trader/core": ["packages/core/src/index.ts"],
+      "@rx-trader/core/*": ["packages/core/src/*"],
+      "@rx-trader/strategies": ["packages/strategies/src/index.ts"],
+      "@rx-trader/strategies/*": ["packages/strategies/src/*"],
+      "@rx-trader/feeds": ["packages/feeds/src/index.ts"],
+      "@rx-trader/execution": ["packages/execution/src/index.ts"],
+      "@rx-trader/control-plane": ["packages/control-plane/src/index.ts"],
+      "@rx-trader/control-plane/app": ["packages/control-plane/src/app.ts"],
+      "@rx-trader/config": ["packages/config/src/index.ts"],
+      "@rx-trader/portfolio": ["packages/portfolio/src/index.ts"],
+      "@rx-trader/portfolio/*": ["packages/portfolio/src/*"],
+      "@rx-trader/pipeline": ["packages/pipeline/src/index.ts"],
+      "@rx-trader/pipeline/*": ["packages/pipeline/src/*"],
+      "@rx-trader/event-store": ["packages/event-store/src/index.ts"],
+      "@rx-trader/event-store/*": ["packages/event-store/src/*"],
+      "@rx-trader/risk": ["packages/risk/src/index.ts"],
+      "@rx-trader/risk/*": ["packages/risk/src/*"],
+      "@rx-trader/observability": ["packages/observability/src/index.ts"],
+      "@rx-trader/observability/*": ["packages/observability/src/*"],
+      "@rx-trader/backtest": ["packages/backtest/src/index.ts"],
+      "@rx-trader/backtest/*": ["packages/backtest/src/*"],
+      "@rx-trader/market-structure": ["packages/market-structure/src/index.ts"],
+      "@rx-trader/market-structure/*": ["packages/market-structure/src/*"]
+    }
+  }
+}

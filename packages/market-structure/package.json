@@ -1,0 +1,6 @@
+{
+  "name": "@rx-trader/market-structure",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

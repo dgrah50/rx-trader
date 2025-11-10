@@ -1,0 +1,11 @@
+node_modules
+bun.lockb
+dist
+*.log
+.DS_Store
+coverage
+.env
+.tmp
+*.csv
+*backtest*.json
+*rxtrader.sqlite*

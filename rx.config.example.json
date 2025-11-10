@@ -1,0 +1,13 @@
+{
+  "GATEWAY_PORT": 8090,
+  "STRATEGY_TRADE_SYMBOL": "ETHUSDT",
+  "STRATEGY_PRIMARY_FEED": "binance",
+  "STRATEGY_EXTRA_FEEDS": "hyperliquid",
+  "STRATEGY_PARAMS": {
+    "fastWindow": 3,
+    "slowWindow": 8
+  },
+  "RISK_MAX_POSITION": 5,
+  "RISK_NOTIONAL_LIMIT": 250000,
+  "INTENT_POST_ONLY": false
+}

@@ -1,0 +1,66 @@
+{
+  "name": "rx-trader",
+  "private": true,
+  "packageManager": "bun@1.1.12",
+  "type": "module",
+  "bin": {
+    "rx": "scripts/cli.ts"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:trader": "bun run scripts/trader.ts",
+    "lint": "bun x eslint .",
+    "typecheck": "bun x tsc --noEmit",
+    "build": "bun x tsup",
+    "test": "bun test",
+    "test:e2e": "RUN_E2E_TESTS=true bun test packages/control-plane/src/runtime.e2e.test.ts",
+    "test:marbles": "bun test --runInBand --config vitest.config.ts --dir packages --include **/*.marble.test.ts",
+    "format": "bun x prettier --write .",
+    "cli": "bun run scripts/cli.ts",
+    "setup": "bun run scripts/cli.ts setup",
+    "docs:config": "bun run scripts/generate-config-doc.ts",
+    "dashboard:dev": "bun --cwd packages/dashboard run dev",
+    "dashboard:build": "bun --cwd packages/dashboard run build",
+    "rx": "bun run scripts/cli.ts",
+    "start:demo": "bun run scripts/cli.ts env:demo --dashboard",
+    "start:dev": "bun run scripts/cli.ts run --dashboard",
+    "start:live": "bun run scripts/cli.ts run --live --dashboard",
+    "link:rx": "bun run scripts/link-rx.ts"
+  },
+  "dependencies": {
+    "@rx-trader/market-structure": "workspace:*",
+    "commander": "^14.0.2",
+    "dotenv": "^16.4.5",
+    "drizzle-kit": "^0.31.6",
+    "drizzle-orm": "^0.44.7",
+    "duckdb": "^1.0.0",
+    "pg": "^8.12.0",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.2.2",
+    "prom-client": "^15.1.0",
+    "rxjs": "^7.8.1",
+    "ws": "^8.17.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.2.0",
+    "@types/node": "^20.12.7",
+    "@types/pg": "^8.15.6",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^7.10.0",
+    "@typescript-eslint/parser": "^7.10.0",
+    "@vitest/coverage-v8": "^4.0.8",
+    "bun-types": "^1.0.9",
+    "eslint": "^9.2.0",
+    "eslint-plugin-import": "^2.29.1",
+    "globals": "^16.5.0",
+    "knip": "^5.68.0",
+    "pg-mem": "^3.0.5",
+    "prettier": "^3.2.5",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}

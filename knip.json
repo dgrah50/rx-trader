@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "scripts/**/*.ts",
+    "examples/**/*.ts",
+    "packages/event-store/src/persistenceWorker.ts"
+  ],
+  "ignore": ["packages/dashboard/**/*"],
+  "ignoreDependencies": ["pino-pretty"]
+}

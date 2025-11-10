@@ -1,0 +1,112 @@
+{
+  "title": "Rx-Trader Operations",
+  "tags": ["rxtrader", "ops"],
+  "timezone": "",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Feed Tick Age (s)",
+      "id": 1,
+      "datasource": null,
+      "targets": [
+        {
+          "expr": "feed_last_tick_age_seconds",
+          "legendFormat": "{{feed}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Persistence Queue Depth",
+      "id": 2,
+      "targets": [
+        {
+          "expr": "persistence_queue_depth",
+          "legendFormat": "depth",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 2000 },
+              { "color": "red", "value": 3500 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Execution Retries / Failures",
+      "id": 3,
+      "targets": [
+        {
+          "expr": "rate(execution_retries_total[5m])",
+          "legendFormat": "retries {{venue}}",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(execution_failures_total[5m])",
+          "legendFormat": "failures {{venue}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Event Store Append Duration",
+      "id": 4,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(event_store_append_duration_seconds_bucket[5m])) by (le, driver))",
+          "legendFormat": "p95 {{driver}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(event_store_append_duration_seconds_sum[5m])) by (driver) / sum(rate(event_store_append_duration_seconds_count[5m])) by (driver)",
+          "legendFormat": "avg {{driver}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {
+    "list": []
+  }
+}

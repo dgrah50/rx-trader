@@ -1,0 +1,68 @@
+groups:
+  - name: rxtrader-feed-health
+    rules:
+      - alert: RxTraderFeedStale
+        expr: feed_last_tick_age_seconds > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Feed {{ $labels.feed }} is stale"
+          description: "No fresh ticks for feed {{ $labels.feed }} in {{ $value | printf \"%.1f\" }} seconds."
+
+  - name: rxtrader-persistence
+    rules:
+      - alert: RxTraderPersistenceQueueHigh
+        expr: persistence_queue_depth > 3500
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Persistence queue depth critical"
+          description: "The shared persistence queue depth is {{ $value }} events. Inline writes may trigger soon."
+      - alert: RxTraderEventStoreSlow
+        expr: histogram_quantile(0.95, rate(event_store_append_duration_seconds_bucket[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Event-store append latency high"
+          description: "p95 append latency for driver {{ $labels.driver }} exceeded 100ms."
+
+  - name: rxtrader-execution
+    rules:
+      - alert: RxTraderExecutionRetrySpike
+        expr: sum(rate(execution_retries_total[5m])) by (venue) > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Execution retries spiking on {{ $labels.venue }}"
+          description: "More than five retries/minute are occurring for {{ $labels.venue }}."
+      - alert: RxTraderExecutionCircuitOpen
+        expr: execution_circuit_state == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Execution circuit open"
+          description: "Circuit breaker is open for venue {{ $labels.venue }}."
+
+  - name: rxtrader-accounting
+    rules:
+      - alert: RxTraderBalanceSyncFailing
+        expr: balance_sync_status == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Balance sync failing for {{ $labels.venue }}"
+          description: "Balance sync status has been 0 for {{ $labels.venue }} for more than 5 minutes."
+      - alert: RxTraderBalanceDriftHigh
+        expr: abs(balance_sync_drift_bps) > 500
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Balance drift exceeds threshold"
+          description: "Balance drift for {{ $labels.venue }} is {{ $value }} bps (>{500}). Investigate venue vs. projection mismatch."
