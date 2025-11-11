@@ -17,6 +17,7 @@ import { timestampSchema, uuidSchema } from './primitives';
 import { safeParse } from '../validation';
 import {
   accountBalanceAdjustedSchema,
+  accountBalanceSnapshotSchema,
   accountMarginUpdatedSchema,
   accountTransferSchema
 } from './account';
@@ -35,6 +36,7 @@ const domainEventTypes = [
   'pnl.analytics',
   'backtest.artifact',
   'account.balance.adjusted',
+  'account.balance.snapshot',
   'account.margin.updated',
   'account.transfer',
   'account.transfer.requested'
@@ -72,6 +74,7 @@ export const domainEventDataSchemas: Record<DomainEventType, z.ZodTypeAny> = {
   'pnl.analytics': portfolioAnalyticsSchema,
   'backtest.artifact': z.unknown(),
   'account.balance.adjusted': accountBalanceAdjustedSchema,
+  'account.balance.snapshot': accountBalanceSnapshotSchema,
   'account.margin.updated': accountMarginUpdatedSchema,
   'account.transfer': accountTransferSchema,
   'account.transfer.requested': accountTransferSchema

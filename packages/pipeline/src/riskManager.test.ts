@@ -26,7 +26,7 @@ describe('createRiskStreams', () => {
       .mockReturnValue([approved$, rejected$]);
 
     const result = createRiskStreams(intents$, config);
-    expect(splitSpy).toHaveBeenCalledWith(intents$, config, undefined, undefined);
+    expect(splitSpy).toHaveBeenCalledWith(intents$, config, undefined, undefined, undefined);
     expect(result.approved$).toBe(approved$);
     expect(result.rejected$).toBe(rejected$);
   });

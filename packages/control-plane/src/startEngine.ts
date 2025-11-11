@@ -1,10 +1,16 @@
 import { monitorPostTradeRisk } from '@rx-trader/risk/postTrade';
 import { portfolio$, portfolioAnalytics$ } from '@rx-trader/portfolio';
-import type { Fill, PortfolioAnalytics } from '@rx-trader/core/domain';
+import type { Fill, PortfolioAnalytics, BalanceEntry, DomainEvent, OrderNew } from '@rx-trader/core/domain';
+import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
 import { startApiServer } from './apiServer';
 import { buildRuntime } from './runtimeBuilder';
-import { createIntentReconciler, ExecutionCircuitOpenError } from '@rx-trader/pipeline';
-import { auditTime } from 'rxjs';
+import {
+  createIntentReconciler,
+  ExecutionCircuitOpenError,
+  createStrategyTelemetry
+} from '@rx-trader/pipeline';
+import { auditTime, filter, map } from 'rxjs';
+import type { Observable } from 'rxjs';
 import {
   BalanceSyncService,
   BinanceBalanceProvider,
@@ -18,8 +24,13 @@ import type { EnvOverrides, AppConfig } from '@rx-trader/config';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
 import { wireFillAccounting } from '@rx-trader/portfolio';
+import { safeParse } from '@rx-trader/core/validation';
 import type { InstrumentMetadata, FeedManagerResult } from '@rx-trader/pipeline';
 import { RebalanceService, TransferExecutionService, createTransferProviders } from '@rx-trader/portfolio';
+import type { EventStore } from '@rx-trader/event-store';
+import { createAuditLogger } from './auditLogger';
+
+type AccountBalanceAdjusted = ReturnType<typeof accountBalanceAdjustedSchema['parse']>;
 
 export interface EngineDependencies extends RuntimeDependencies {
   startApiServer?: typeof startApiServer;
@@ -54,16 +65,185 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     marketStore,
     logger,
     accountState,
-    instrument
+    instrument,
+    strategyRuntimes,
+    accountGuard,
+    marginGuard
   } = await buildRuntime({ ...options, clock }, options.dependencies);
+
+  const auditEnabled = Boolean(
+    process.env.AUDIT_LOG_PATH ||
+      (process.env.AUDIT_VERBOSE ?? '').toLowerCase() === 'true' ||
+      process.env.AUDIT_VERBOSE === '1'
+  );
+  const audit = createAuditLogger({
+    enabled: auditEnabled,
+    path: process.env.AUDIT_LOG_PATH,
+    logger
+  });
+
+
+  const venueId = instrument.venue ?? execution.adapter.id;
+  const normalizedVenue = normalizeVenue(venueId);
+  const quoteAsset = instrument.quoteAsset;
+
+  type BalanceView = {
+    available: number;
+    locked: number;
+    total: number;
+    lastUpdated?: number;
+  };
+
+  type BalanceSnapshot = {
+    base: BalanceView | null;
+    quote: BalanceView | null;
+  };
+
+  const summarizeBalanceEntry = (entry?: BalanceEntry | null): BalanceView | null =>
+    entry
+      ? {
+          available: entry.available,
+          locked: entry.locked,
+          total: entry.total,
+          lastUpdated: entry.lastUpdated
+        }
+      : null;
+
+  const captureBalances = (): BalanceSnapshot | null => {
+    const baseEntry = instrument.baseAsset
+      ? accountState.getBalance(normalizedVenue, instrument.baseAsset)
+      : undefined;
+    const quoteEntry = quoteAsset
+      ? accountState.getBalance(normalizedVenue, quoteAsset)
+      : undefined;
+    if (!baseEntry && !quoteEntry) {
+      return null;
+    }
+    return {
+      base: summarizeBalanceEntry(baseEntry ?? null),
+      quote: summarizeBalanceEntry(quoteEntry ?? null)
+    };
+  };
+
+  const getOrderPx = (order: OrderNew) => {
+    if (typeof order.px === 'number' && Number.isFinite(order.px)) return order.px;
+    const meta = order.meta as Record<string, unknown> | undefined;
+    const execPx = meta?.execRefPx;
+    return typeof execPx === 'number' ? execPx : null;
+  };
+
+  const projectBalances = (snapshot: BalanceSnapshot | null, fill: Fill) => {
+    if (!snapshot) return null;
+    const px = fill.px ?? 0;
+    const fee = fill.fee ?? 0;
+    const baseStart = snapshot.base?.total ?? 0;
+    const quoteStart = snapshot.quote?.total ?? 0;
+    const baseDelta = fill.side === 'BUY' ? fill.qty : -fill.qty;
+    const quoteDelta = fill.side === 'BUY' ? -(fill.qty * px) - fee : fill.qty * px - fee;
+    return {
+      baseAfter: baseStart + baseDelta,
+      quoteAfter: quoteStart + quoteDelta,
+      baseDelta,
+      quoteDelta
+    };
+  };
+
+  const describeMarginState = () => marginGuard?.inspect?.() ?? null;
+  const describeQuoteReserve = () => accountGuard?.inspect?.() ?? null;
+  const logAudit = audit.log;
+
+  const seedResult = await seedDemoBalanceIfNeeded({
+    live,
+    config,
+    store,
+    accountState,
+    instrument,
+    clock
+  });
+
+  const initialCash = getInitialCashBalance({
+    accountState,
+    venue: normalizedVenue,
+    quoteAsset,
+    fallback: seedResult?.amount
+  });
+
+  const cashAdjustments$ = createQuoteCashAdjustment$({
+    store,
+    venue: normalizedVenue,
+    quoteAsset
+  });
+
+  const fillLedger$ = createQuoteFillLedger$({
+    store,
+    venue: normalizedVenue,
+    quoteAsset
+  });
+
+  fillLedger$?.subscribe(({ orderId, amount }) => {
+    accountGuard?.consume?.(orderId, amount);
+    logAudit('quote-ledger', {
+      orderId,
+      ledgerAmount: amount,
+      quoteReserve: describeQuoteReserve()
+    });
+  });
+
+  const strategyTelemetry = createStrategyTelemetry({
+    runtimes: strategyRuntimes,
+    clock
+  });
 
   rejected$.subscribe((decision) => {
     metrics.riskRejected.inc();
     logger.warn({ reasons: decision.reasons }, 'Order rejected');
+    strategyTelemetry.recordRiskReject(decision.order, decision.reasons);
+    logAudit('risk-rejected', {
+      orderId: decision.order.id,
+      symbol: decision.order.symbol,
+      side: decision.order.side,
+      qty: decision.order.qty,
+      px: getOrderPx(decision.order),
+      reasons: decision.reasons,
+      balances: captureBalances(),
+      quoteReserve: describeQuoteReserve(),
+      margin: describeMarginState()
+    });
   });
 
   const fills$ = execution.fills$;
-  fills$.subscribe((fill: Fill) => logger.info({ fill }, 'Fill event'));
+  fills$.subscribe((fill: Fill) => {
+    const balancesBefore = captureBalances();
+    const projection = projectBalances(balancesBefore, fill);
+    logAudit('fill', {
+      fill,
+      balancesBefore,
+      projection,
+      margin: describeMarginState(),
+      quoteReserve: describeQuoteReserve()
+    });
+    logger.info({ fill }, 'Fill event');
+    strategyTelemetry.recordFill(fill);
+    if (fill.fee && fill.fee > 0) {
+      accountGuard?.consume?.(fill.orderId, fill.fee);
+      logAudit('quote-reserve', {
+        orderId: fill.orderId,
+        fee: fill.fee,
+        quoteReserve: describeQuoteReserve()
+      });
+    }
+  });
+
+  execution.rejects$.subscribe((reject) => {
+    strategyTelemetry.recordExecutionReject(reject);
+    accountGuard?.release?.(reject.id);
+    logAudit('execution-reject', {
+      orderId: reject.id,
+      reason: reject.reason,
+      quoteReserve: describeQuoteReserve(),
+      margin: describeMarginState()
+    });
+  });
 
   const stopAccounting = wireFillAccounting({
     fills$,
@@ -82,14 +262,20 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     feedManager,
     live
   });
+  const driftThreshold =
+    live && (config.accounting?.balanceSyncMaxDriftBps ?? null) !== null
+      ? config.accounting?.balanceSyncMaxDriftBps
+      : Number.POSITIVE_INFINITY;
   const balanceSync = new BalanceSyncService({
     accountId: config.execution.account,
     provider: balanceProvider,
     getBalance: (venue, asset) => accountState.getBalance(venue, asset),
     enqueue: persistence.enqueue,
+    enqueueSnapshot: persistence.enqueue,
     clock,
     intervalMs: config.accounting?.balanceSyncIntervalMs,
-    driftBpsThreshold: config.accounting?.balanceSyncMaxDriftBps,
+    driftBpsThreshold: driftThreshold,
+    applyLedgerDeltas: Boolean(config.accounting?.balanceSyncMutatesLedger),
     logger,
     instrumentation: {
       recordSuccess: ({ venue, timestampMs, driftBps }) => {
@@ -144,11 +330,43 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   });
 
   approved$.subscribe(async (decision) => {
+    const px = getOrderPx(decision.order);
+    const notional = decision.notional ?? (px ? Math.abs(decision.order.qty * px) : null);
+    logAudit('risk-approved', {
+      orderId: decision.order.id,
+      symbol: decision.order.symbol,
+      side: decision.order.side,
+      qty: decision.order.qty,
+      px,
+      notional,
+      balances: captureBalances(),
+      quoteReserve: describeQuoteReserve(),
+      margin: describeMarginState()
+    });
+    if (accountGuard && decision.notional && decision.order.side === 'BUY') {
+      accountGuard.reserve?.(decision.order.id, decision.notional);
+      logAudit('quote-reserve', {
+        orderId: decision.order.id,
+        reserved: decision.notional,
+        quoteReserve: describeQuoteReserve()
+      });
+    }
+    strategyTelemetry.recordOrder(decision.order);
     persistence.enqueue({
       id: crypto.randomUUID(),
       type: 'order.new',
       data: decision.order,
       ts: clock.now()
+    });
+    logAudit('order-new', {
+      orderId: decision.order.id,
+      symbol: decision.order.symbol,
+      side: decision.order.side,
+      qty: decision.order.qty,
+      px,
+      notional,
+      quoteReserve: describeQuoteReserve(),
+      margin: describeMarginState()
     });
     const release = intentReconciler.track(decision.order);
     try {
@@ -157,6 +375,16 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
         logger.info({ order: decision.order }, 'Dry-run paper execution');
       }
       metrics.ordersSubmitted.inc();
+      logAudit('order-submit', {
+        orderId: decision.order.id,
+        symbol: decision.order.symbol,
+        side: decision.order.side,
+        qty: decision.order.qty,
+        px,
+        status: 'submitted',
+        quoteReserve: describeQuoteReserve(),
+        margin: describeMarginState()
+      });
     } catch (error) {
       release();
       if (error instanceof ExecutionCircuitOpenError) {
@@ -175,10 +403,24 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       } else {
         logger.error({ error: error instanceof Error ? error.message : error }, 'Execution submit error');
       }
+      accountGuard?.release?.(decision.order.id);
+      logAudit('order-submit-error', {
+        orderId: decision.order.id,
+        symbol: decision.order.symbol,
+        side: decision.order.side,
+        qty: decision.order.qty,
+        px,
+        error: error instanceof Error ? error.message : String(error),
+        quoteReserve: describeQuoteReserve(),
+        margin: describeMarginState()
+      });
     }
   });
 
-  const snapshots$ = portfolio$({ fills$, marks$: feedManager.marks$ }, clock);
+  const snapshots$ = portfolio$(
+    { fills$, marks$: feedManager.marks$, cashAdjustments$, initialCash },
+    clock
+  );
   const analytics$ = portfolioAnalytics$(snapshots$);
 
   monitorPostTradeRisk(snapshots$, { navFloor: -10_000, maxDrawdown: 5_000 }).subscribe(
@@ -215,6 +457,10 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     logger,
     metrics,
     live,
+    runtimeMeta: {
+      live,
+      strategies: () => strategyTelemetry.snapshot()
+    },
     accounting: { balanceTelemetry },
     rebalancer: () => rebalancer.getTelemetry()
   });
@@ -229,8 +475,10 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     balanceSync.stop();
     rebalancer.stop();
     transferExecutor.stop();
+    strategyTelemetry.stop();
     accountState.stop();
     intentReconciler.stop();
+    audit.close();
     if (stopApi) {
       void stopApi();
     }
@@ -284,6 +532,132 @@ const createBalanceProvider = (
     marks$: input.feedManager.marks$,
     fallbackPrice: 100
   });
+};
+
+const isBalanceAdjustedEvent = (
+  event: DomainEvent
+): event is DomainEvent<'account.balance.adjusted'> => event.type === 'account.balance.adjusted';
+
+const createQuoteCashAdjustment$ = ({
+  store,
+  venue,
+  quoteAsset
+}: {
+  store: Pick<EventStore, 'stream$'>;
+  venue?: string;
+  quoteAsset?: string;
+}): Observable<number> | undefined => {
+  if (!venue || !quoteAsset) {
+    return undefined;
+  }
+  const normalizedVenue = normalizeVenue(venue);
+  return store.stream$.pipe(
+    filter(isBalanceAdjustedEvent),
+    map((event) => event.data as AccountBalanceAdjusted),
+    filter((data) => normalizeVenue(data.venue) === normalizedVenue),
+    filter((data) => data.asset === quoteAsset),
+    filter((data) => data.reason !== 'fill'),
+    map((data) => data.delta)
+  );
+};
+
+const createQuoteFillLedger$ = ({
+  store,
+  venue,
+  quoteAsset
+}: {
+  store: Pick<EventStore, 'stream$'>;
+  venue?: string;
+  quoteAsset?: string;
+}): Observable<{ orderId: string; amount: number }> | undefined => {
+  if (!venue || !quoteAsset) {
+    return undefined;
+  }
+  const normalizedVenue = normalizeVenue(venue);
+  return store.stream$.pipe(
+    filter(isBalanceAdjustedEvent),
+    map((event) => event.data as AccountBalanceAdjusted),
+    filter((data) => data.reason === 'fill'),
+    filter((data) => normalizeVenue(data.venue) === normalizedVenue),
+    filter((data) => data.asset === quoteAsset),
+    map((data) => ({
+      orderId: extractOrderId(data.metadata),
+      amount: Math.abs(data.delta)
+    })),
+    filter((payload) => Boolean(payload.orderId) && payload.amount > 0),
+    map((payload) => ({ orderId: payload.orderId!, amount: payload.amount }))
+  );
+};
+
+const extractOrderId = (metadata: Record<string, unknown> | undefined): string | null => {
+  const value = metadata?.orderId;
+  return typeof value === 'string' ? value : null;
+};
+
+const getInitialCashBalance = ({
+  accountState,
+  venue,
+  quoteAsset,
+  fallback
+}: {
+  accountState: { getBalance: (venue: string, asset: string) => BalanceEntry | undefined };
+  venue: string;
+  quoteAsset?: string;
+  fallback?: number;
+}): number => {
+  if (!quoteAsset) {
+    return fallback ?? 0;
+  }
+  const entry = accountState.getBalance(venue, quoteAsset);
+  if (entry && Number.isFinite(entry.available)) {
+    return entry.available;
+  }
+  return fallback ?? 0;
+};
+
+const seedDemoBalanceIfNeeded = async ({
+  live,
+  config,
+  store,
+  accountState,
+  instrument,
+  clock
+}: {
+  live: boolean;
+  config: AppConfig;
+  store: EventStore;
+  accountState: { getBalance: (venue: string, asset: string) => BalanceEntry | undefined };
+  instrument: InstrumentMetadata;
+  clock: Clock;
+}): Promise<{ amount: number; venue: string; asset: string } | null> => {
+  if (live) return null;
+  const seedAmount = config.accounting?.seedDemoBalance ?? 0;
+  if (seedAmount <= 0) return null;
+  const venue = instrument.venue ?? instrument.symbol ?? 'paper';
+  const quoteAsset = instrument.quoteAsset ?? 'USDT';
+  const existing = accountState.getBalance(venue, quoteAsset);
+  if (existing && existing.total > 0) {
+    return { amount: existing.total, venue, asset: quoteAsset };
+  }
+  const event = {
+    id: crypto.randomUUID(),
+    type: 'account.balance.adjusted' as const,
+    data: safeParse(accountBalanceAdjustedSchema, {
+      id: crypto.randomUUID(),
+      t: clock.now(),
+      accountId: config.execution.account,
+      venue,
+      asset: quoteAsset,
+      delta: seedAmount,
+      reason: 'deposit',
+      metadata: {
+        seed: 'demo'
+      }
+    }),
+    ts: clock.now()
+  };
+  await store.append(event);
+  return { amount: seedAmount, venue, asset: quoteAsset };
 };
 
 const normalizeVenue = (value: string) => {

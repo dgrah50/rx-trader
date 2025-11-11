@@ -96,6 +96,25 @@ const ensureTables = (database: Database) => {
       FOREIGN KEY (exch_id) REFERENCES exch(id) ON UPDATE CASCADE ON DELETE CASCADE
     );
   `);
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS fee_schedule (
+      id TEXT PRIMARY KEY,
+      exch_id TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      product_type TEXT NOT NULL,
+      tier TEXT NOT NULL DEFAULT 'default',
+      maker_bps REAL NOT NULL,
+      taker_bps REAL NOT NULL,
+      effective_from INTEGER NOT NULL DEFAULT (unixepoch()),
+      effective_to INTEGER,
+      source TEXT NOT NULL DEFAULT 'manual',
+      metadata TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      FOREIGN KEY (exch_id) REFERENCES exch(id) ON UPDATE CASCADE ON DELETE CASCADE,
+      UNIQUE (exch_id, symbol, product_type, tier, effective_from)
+    );
+  `);
 };
 
 export const createMarketStructureStore = (sqlitePath: string): MarketStructureStore => {

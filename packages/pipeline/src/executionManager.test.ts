@@ -52,6 +52,36 @@ describe('createExecutionManager', () => {
     expect(fills).toHaveLength(1);
   });
 
+  it('annotates fills with fee and liquidity metadata', async () => {
+    const enqueue = vi.fn();
+    const config = loadConfig();
+    const clock = { now: () => 1 };
+    const metrics = createTestMetrics();
+    const logger = createLogger('test', { enabled: false });
+    const manager = createExecutionManager({
+      live: false,
+      config,
+      enqueue,
+      clock,
+      metrics,
+      logger
+    });
+
+    const fills: any[] = [];
+    manager.fills$.subscribe((fill) => fills.push(fill));
+
+    const order = {
+      ...createOrder(),
+      type: 'LMT' as const,
+      meta: { expectedFeeBps: 25, liquidity: 'MAKER' }
+    };
+    await manager.submit(order);
+
+    expect(fills).toHaveLength(1);
+    expect(fills[0]!.fee).toBeCloseTo(order.px! * order.qty * 0.0025, 10);
+    expect(fills[0]!.liquidity).toBe('MAKER');
+  });
+
   it('uses Binance gateway when live=true and credentials are provided', () => {
     const enqueue = vi.fn();
     const config = loadConfig({

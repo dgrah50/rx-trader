@@ -119,4 +119,28 @@ describe('portfolio$', () => {
       expect(position).toMatchObject({ t: clock.now() });
     });
   });
+
+  it('initializes cash and applies external adjustments', () => {
+    const clock = createManualClock(0);
+    const fills$ = new Subject<Fill>();
+    const marks$ = new Subject<MarketTick>();
+    const cash$ = new Subject<number>();
+    const snapshots: PortfolioSnapshot[] = [];
+
+    const subscription = portfolio$(
+      { fills$, marks$, cashAdjustments$: cash$, initialCash: 1_000 },
+      clock
+    ).subscribe((snapshot) => snapshots.push(snapshot));
+
+    clock.advance(1);
+    marks$.next(createMark(clock, { last: 100 }));
+    expect(snapshots.at(-1)?.cash).toBeCloseTo(1_000);
+    expect(snapshots.at(-1)?.nav).toBeCloseTo(1_000);
+
+    cash$.next(500);
+    expect(snapshots.at(-1)?.cash).toBeCloseTo(1_500);
+    expect(snapshots.at(-1)?.nav).toBeCloseTo(1_500);
+
+    subscription.unsubscribe();
+  });
 });

@@ -1,4 +1,7 @@
-import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
+import {
+  accountBalanceAdjustedSchema,
+  accountBalanceSnapshotSchema
+} from '@rx-trader/core/domain';
 import { safeParse } from '@rx-trader/core/validation';
 import type {
   BalanceProvider,
@@ -16,6 +19,7 @@ export class BalanceSyncService {
   private lastSuccess: number | null = null;
   private lastError: { message: string; ts: number } | null = null;
   private lastDriftBps: number | null = null;
+  private readonly totalsCache = new Map<string, number>();
   constructor(private readonly options: BalanceSyncOptions) {}
 
   async start() {
@@ -66,9 +70,11 @@ export class BalanceSyncService {
   }
 
   getTelemetry(): BalanceSyncTelemetry {
+    const providerKind = this.options.provider.constructor?.name ?? 'Provider';
+    const providerLabel = `${providerKind.replace(/Provider$/, '').toLowerCase()}(${this.options.provider.venue})`;
     return {
       venue: this.options.provider.venue,
-      provider: this.options.provider.venue,
+      provider: providerLabel,
       lastRunMs: this.lastRun,
       lastSuccessMs: this.lastSuccess,
       lastError: this.lastError,
@@ -78,16 +84,20 @@ export class BalanceSyncService {
 
   private async reconcileSnapshot(snapshot: BalanceSnapshot) {
     const current = this.options.getBalance(snapshot.venue, snapshot.asset);
-    const currentTotal = current?.total ?? 0;
+    const key = `${snapshot.venue}:${snapshot.asset}`;
+    const cachedTotal = this.totalsCache.get(key);
+    const currentTotal = cachedTotal ?? current?.total ?? 0;
     const targetTotal = snapshot.available + snapshot.locked;
     const delta = targetTotal - currentTotal;
     if (Math.abs(delta) < EPSILON) {
+      this.recordSnapshot(snapshot, currentTotal, delta, targetTotal);
       return;
     }
     const driftBps = targetTotal === 0 ? null : (delta / targetTotal) * 10_000;
     this.lastDriftBps = driftBps ?? 0;
     const threshold = this.options.driftBpsThreshold ?? 500;
-    if (driftBps !== null && Math.abs(driftBps) > threshold) {
+    const trackDrift = Number.isFinite(threshold);
+    if (trackDrift && driftBps !== null && Math.abs(driftBps) > threshold) {
       this.options.logger?.warn(
         {
           venue: snapshot.venue,
@@ -100,29 +110,68 @@ export class BalanceSyncService {
       );
     }
     const ts = this.options.clock.now();
+    if (this.options.applyLedgerDeltas) {
+      const payload = safeParse(
+        accountBalanceAdjustedSchema,
+        {
+          id: crypto.randomUUID(),
+          t: ts,
+          accountId: this.options.accountId,
+          venue: snapshot.venue,
+          asset: snapshot.asset,
+          delta,
+          newTotal: targetTotal,
+          reason: 'sync',
+          metadata: {
+            provider: this.options.provider.venue,
+            available: snapshot.available,
+            locked: snapshot.locked
+          }
+        },
+        { force: true }
+      );
+      this.options.enqueue({
+        id: crypto.randomUUID(),
+        type: 'account.balance.adjusted',
+        data: payload,
+        ts
+      });
+      this.totalsCache.set(key, targetTotal);
+    }
+    this.recordSnapshot(snapshot, currentTotal, delta, targetTotal);
+  }
+
+  private recordSnapshot(
+    snapshot: BalanceSnapshot,
+    ledgerTotal: number,
+    delta: number,
+    total: number
+  ) {
     const payload = safeParse(
-      accountBalanceAdjustedSchema,
+      accountBalanceSnapshotSchema,
       {
         id: crypto.randomUUID(),
-        t: ts,
+        t: this.options.clock.now(),
         accountId: this.options.accountId,
         venue: snapshot.venue,
         asset: snapshot.asset,
-        delta,
-        reason: 'sync',
+        total,
+        provider: this.options.provider.venue,
+        ledgerTotal,
+        drift: delta,
         metadata: {
-          provider: this.options.provider.venue,
           available: snapshot.available,
           locked: snapshot.locked
         }
       },
       { force: true }
     );
-    this.options.enqueue({
+    const enqueueSnapshot = this.options.enqueueSnapshot ?? this.options.enqueue;
+    enqueueSnapshot({
       id: crypto.randomUUID(),
-      type: 'account.balance.adjusted',
+      type: 'account.balance.snapshot',
       data: payload,
-      ts
+      ts: payload.t
     });
   }
 }

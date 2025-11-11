@@ -16,6 +16,8 @@ import { ExecutionVenue } from '@rx-trader/core/constants';
 import { getFeedHealthSnapshots, type FeedHealthSnapshot } from '@rx-trader/pipeline/feedHealth';
 import type { BalanceSyncTelemetry } from '@rx-trader/portfolio/balances/types';
 import { planRebalance, flattenBalancesState, type RebalancePlan } from '@rx-trader/portfolio';
+import type { StrategyTelemetrySnapshot } from '@rx-trader/pipeline';
+import { resolveStrategyMarginConfig } from './marginConfig';
 import {
   PaperExecutionAdapter,
   BinanceMockGateway,
@@ -54,8 +56,13 @@ const createExecutionAdapters = (config: AppConfig) => {
 
 export type ExecutionAdapters = ReturnType<typeof createExecutionAdapters>;
 
-interface RuntimeMeta {
+export type StrategyRuntimeStatus = StrategyTelemetrySnapshot;
+
+type StrategyStatusSource = StrategyRuntimeStatus[] | (() => StrategyRuntimeStatus[]);
+
+export interface RuntimeMeta {
   live?: boolean;
+  strategies?: StrategyStatusSource;
 }
 
 interface AccountingTelemetry {
@@ -67,6 +74,38 @@ const clampHistoryLimit = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return 10;
   return Math.max(1, Math.min(100, Math.floor(value)));
 };
+
+const emptyStrategyMetrics = (): StrategyRuntimeStatus['metrics'] => ({
+  signals: 0,
+  intents: 0,
+  orders: 0,
+  fills: 0,
+  rejects: 0,
+  lastSignalTs: null,
+  lastIntentTs: null,
+  lastOrderTs: null,
+  lastFillTs: null,
+  lastRejectTs: null
+});
+
+const normalizeStrategyStatus = (
+  definition: AppConfig['strategies'][number],
+  fees: { makerBps: number; takerBps: number; source: string },
+  config: AppConfig
+): StrategyRuntimeStatus => ({
+  id: definition.id,
+  type: definition.type,
+  tradeSymbol: definition.tradeSymbol,
+  primaryFeed: definition.primaryFeed,
+  extraFeeds: definition.extraFeeds ?? [],
+  mode: definition.mode ?? 'live',
+  priority: definition.priority ?? 0,
+  budget: definition.budget,
+  params: definition.params ?? {},
+  fees,
+  margin: resolveStrategyMarginConfig(definition, config),
+  metrics: emptyStrategyMetrics()
+});
 
 const readBacktestHistory = async (
   store: Awaited<ReturnType<typeof createEventStore>>,
@@ -103,6 +142,16 @@ const readRecentOrders = async (
     .sort((a, b) => b.ts - a.ts)
     .slice(0, clampHistoryLimit(limit))
     .map((event) => ({ id: event.id, type: event.type, ts: event.ts, data: event.data }));
+};
+
+const readRecentEvents = async (
+  store: Awaited<ReturnType<typeof createEventStore>>,
+  limit: number
+) => {
+  const events = await store.read();
+  return events
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, clampHistoryLimit(limit));
 };
 
 const getClientKey = (request: Request) =>
@@ -320,6 +369,31 @@ const handleCorsPreflight = (request: Request) => {
     const pnlSnapshot = await readPnlSnapshot();
     const balanceSync = balanceTelemetryFn();
     const feeds: FeedHealthSnapshot[] = getFeedHealthSnapshots();
+    const defaultFeeTier = {
+      makerBps: config.execution.policy.makerFeeBps,
+      takerBps: config.execution.policy.takerBps,
+      source: 'config'
+    };
+    const strategySource: StrategyStatusSource =
+      runtimeMeta.strategies ??
+      (config.strategies ?? []).map((definition) =>
+        normalizeStrategyStatus(definition, defaultFeeTier, config)
+      );
+    const strategyStatuses =
+      typeof strategySource === 'function' ? strategySource() : strategySource;
+    const primaryStrategySource = strategyStatuses[0] ?? null;
+    const primaryStrategy = primaryStrategySource
+      ? {
+          type: primaryStrategySource.type,
+          tradeSymbol: primaryStrategySource.tradeSymbol,
+          primaryFeed: primaryStrategySource.primaryFeed,
+          extraFeeds: primaryStrategySource.extraFeeds,
+          params: primaryStrategySource.params ?? {},
+          fees: primaryStrategySource.fees,
+          margin: primaryStrategySource.margin
+        }
+      : null;
+
     return {
       timestamp: Date.now(),
       app: config.app,
@@ -327,7 +401,8 @@ const handleCorsPreflight = (request: Request) => {
       runtime: {
         live: Boolean(runtimeMeta.live),
         killSwitch,
-        strategy: config.strategy
+        strategy: primaryStrategy,
+        strategies: strategyStatuses
       },
       persistence: {
         driver: config.persistence.driver,
@@ -538,6 +613,11 @@ const handleCorsPreflight = (request: Request) => {
     }
     if (url.pathname === '/events' && request.method === 'GET') {
       return handleEventStream();
+    }
+    if (url.pathname === '/events/recent' && request.method === 'GET') {
+      const limit = clampHistoryLimit(Number(url.searchParams.get('limit') ?? '20'));
+      const recentEvents = await readRecentEvents(store, limit);
+      return json(recentEvents);
     }
     if (url.pathname === '/logs' && request.method === 'GET') {
       return handleLogStream();

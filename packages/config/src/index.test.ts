@@ -43,9 +43,9 @@ describe('loadConfig', () => {
     process.env.STRATEGY_TRADE_SYMBOL = 'btcusdt';
 
     const config = loadConfig();
-    expect(config.strategy.tradeSymbol).toBe('BTCUSDT');
+    expect(config.strategies[0]?.tradeSymbol).toBe('BTCUSDT');
     expect(config.risk.maxPosition).toBe(7);
-    expect((config.strategy.params as Record<string, unknown>).fastWindow).toBe(5);
+    expect((config.strategies[0]?.params as Record<string, unknown>).fastWindow).toBe(5);
 
     unlinkSync(filePath);
   });
@@ -71,5 +71,54 @@ describe('loadConfig', () => {
     expect(details.configFilePath).toBe(filePath);
 
     unlinkSync(filePath);
+  });
+
+  it('falls back to a default strategy definition when STRATEGIES is empty', () => {
+    const config = loadConfig();
+    expect(config.strategies).toHaveLength(1);
+    const [strategy] = config.strategies;
+    expect(strategy.id).toBe('default');
+    expect(strategy.mode).toBe('live');
+    expect(strategy.tradeSymbol).toBe('BTCUSDT');
+    expect(strategy.budget?.notional).toBe(config.risk.notional);
+    expect(strategy.budget?.throttle?.windowMs).toBe(config.risk.throttle.windowMs);
+  });
+
+  it('parses multiple strategies from STRATEGIES JSON', () => {
+    process.env.STRATEGIES = JSON.stringify([
+      {
+        id: 'btc-momo',
+        type: 'MOMENTUM',
+        tradeSymbol: 'btcusdt',
+        primaryFeed: 'binance',
+        params: { fastWindow: 5 },
+        priority: 7,
+        mode: 'sandbox',
+        budget: {
+          notional: 250000,
+          throttle: { windowMs: 500, maxCount: 2 }
+        }
+      },
+      {
+        id: 'arb',
+        type: 'ARBITRAGE',
+        tradeSymbol: 'ethusdt',
+        primaryFeed: 'hyperliquid',
+        extraFeeds: ['binance']
+      }
+    ]);
+
+    const config = loadConfig();
+    expect(config.strategies).toHaveLength(2);
+    const [first, second] = config.strategies;
+    expect(first.id).toBe('btc-momo');
+    expect(first.mode).toBe('sandbox');
+    expect(first.priority).toBe(7);
+    expect(first.tradeSymbol).toBe('BTCUSDT');
+    expect(first.budget?.notional).toBe(250000);
+    expect(first.budget?.throttle?.windowMs).toBe(500);
+    expect(second.id).toBe('arb');
+    expect(second.extraFeeds).toContain('binance');
+    expect(second.budget?.notional).toBe(config.risk.notional);
   });
 });

@@ -1,4 +1,9 @@
-import type { DomainEvent, PortfolioAnalytics, BalanceEntry, MarginSummary } from '@rx-trader/core/domain';
+import type {
+  DomainEvent,
+  PortfolioAnalytics,
+  BalanceEntry,
+  MarginSummary
+} from '@rx-trader/core/domain';
 import type { EventStore } from './eventStore';
 
 interface Projection<TState> {
@@ -84,14 +89,61 @@ export const balancesProjection: Projection<BalancesState> = {
         total: 0,
         lastUpdated: 0
       } satisfies BalanceEntry;
-      const total = existing.total + data.delta;
+      const expected = existing.total + data.delta;
+      const nextTotal =
+        typeof data.newTotal === 'number' && Number.isFinite(data.newTotal)
+          ? data.newTotal
+          : expected;
+      if (
+        typeof data.newTotal === 'number' &&
+        Math.abs(data.newTotal - expected) > 1e-6
+      ) {
+        throw new Error(
+          `Balance delta mismatch for ${venue}/${asset}: expected ${expected} got ${data.newTotal}`
+        );
+      }
       venueBalances[asset] = {
         ...existing,
-        total,
-        available: total,
+        total: nextTotal,
+        available: nextTotal,
         lastUpdated: data.t
       };
       state.balances[venue] = venueBalances;
+      const eventTs = data.t ?? event.ts ?? Date.now();
+      state.updatedAt = Math.max(state.updatedAt ?? 0, eventTs);
+    }
+    return state;
+  }
+};
+
+interface BalanceSnapshotEntry {
+  total: number;
+  ledgerTotal: number;
+  drift: number;
+  provider: string;
+  t: number;
+}
+
+interface BalanceSnapshotState {
+  snapshots: Record<string, Record<string, BalanceSnapshotEntry>>;
+  updatedAt?: number;
+}
+
+export const balanceSnapshotsProjection: Projection<BalanceSnapshotState> = {
+  name: 'account_balance_snapshots',
+  init: () => ({ snapshots: {} }),
+  reduce: (state, event) => {
+    if (event.type === 'account.balance.snapshot') {
+      const data = event.data as any;
+      const venueSnapshots = state.snapshots[data.venue] ?? {};
+      venueSnapshots[data.asset] = {
+        total: data.total,
+        ledgerTotal: data.ledgerTotal,
+        drift: data.drift,
+        provider: data.provider,
+        t: data.t
+      };
+      state.snapshots[data.venue] = venueSnapshots;
       const eventTs = data.t ?? event.ts ?? Date.now();
       state.updatedAt = Math.max(state.updatedAt ?? 0, eventTs);
     }

@@ -6,3 +6,5 @@ export * from './executionManager';
 export * from './executionPolicy';
 export * from './intentReconciler';
 export * from './types';
+export * from './strategyScheduler';
+export * from './strategyTelemetry';

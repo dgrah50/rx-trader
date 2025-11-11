@@ -1,4 +1,5 @@
 import { createControlPlaneRouter } from '@rx-trader/control-plane/app';
+import type { StrategyRuntimeStatus } from '@rx-trader/control-plane/app';
 import type { AppConfig } from '@rx-trader/config';
 import type { createEventStore } from '@rx-trader/event-store';
 import type { LoggerInstance, MetricsInstance } from '@rx-trader/pipeline';
@@ -12,6 +13,10 @@ interface ApiServerOptions {
   logger: LoggerInstance;
   metrics: MetricsInstance;
   live?: boolean;
+  runtimeMeta?: {
+    live?: boolean;
+    strategies?: StrategyRuntimeStatus[] | (() => StrategyRuntimeStatus[]);
+  };
   accounting?: {
     balanceTelemetry?: () => BalanceSyncTelemetry;
   };
@@ -23,7 +28,7 @@ export const startApiServer = async (options: ApiServerOptions) => {
     store: options.store,
     logger: options.logger,
     metrics: options.metrics,
-    runtimeMeta: { live: options.live ?? false },
+    runtimeMeta: options.runtimeMeta ?? { live: options.live ?? false },
     accounting: {
       balanceTelemetry: options.accounting?.balanceTelemetry,
       rebalancer: options.rebalancer

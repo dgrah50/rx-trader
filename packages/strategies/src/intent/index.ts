@@ -34,6 +34,8 @@ interface IntentBuilderOptions {
   tickSize?: number;
   lotSize?: number;
   now?: () => number;
+  strategyId?: string;
+  feeSource?: string;
 }
 
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -154,7 +156,8 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
       ...meta,
       mode: policy.mode,
       postOnly: policy.postOnly,
-      reduceOnly: policy.reduceOnly
+      reduceOnly: policy.reduceOnly,
+      ...(opts.strategyId ? { strategyId: opts.strategyId } : {})
     };
 
     return order;
@@ -175,7 +178,8 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
     if (execRefPx <= 0) return null;
 
     const edgeBps = computeEdgeBps(signal.px, execRefPx, signal.action as Side);
-    const required = policy.minEdgeBps + policy.takerFeeBps + policy.takerSlipBps;
+    const feeBps = policy.takerFeeBps;
+    const required = policy.minEdgeBps + feeBps + policy.takerSlipBps;
     if (edgeBps < required) return null;
 
     const qty = computeQty(execRefPx);
@@ -203,7 +207,10 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
         gateBps: required,
         edgeBps,
         feedTs: tick.t,
-        netEdgeBps: edgeBps - required
+        netEdgeBps: edgeBps - required,
+        liquidity: 'TAKER',
+        expectedFeeBps: feeBps,
+        feeSource: opts.feeSource ?? 'policy'
       },
       timestamp
     );
@@ -244,7 +251,8 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
 
     const execRefPx = px;
     const edgeBps = computeEdgeBps(signal.px, execRefPx, signal.action as Side);
-    const required = policy.minEdgeBps + policy.makerFeeBps + policy.adverseSelectionBps;
+    const feeBps = policy.makerFeeBps;
+    const required = policy.minEdgeBps + feeBps + policy.adverseSelectionBps;
     if (edgeBps < required) {
       return null;
     }
@@ -276,7 +284,10 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
         gateBps: required,
         edgeBps,
         feedTs: tick.t,
-        netEdgeBps: edgeBps - required
+        netEdgeBps: edgeBps - required,
+        liquidity: 'MAKER',
+        expectedFeeBps: feeBps,
+        feeSource: opts.feeSource ?? 'policy'
       },
       timestamp
     );

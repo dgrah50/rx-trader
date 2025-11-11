@@ -47,11 +47,14 @@ export const envSchema = z.object({
   HYPERLIQUID_API_BASE: z.string().url().default('https://api.hyperliquid.xyz'),
   HYPERLIQUID_WALLET_ADDRESS: z.string().optional(),
   HYPERLIQUID_SUBACCOUNT: z.coerce.number().optional(),
+  SPOT_MARGIN_ENABLED: booleanEnv.default(false),
+  SPOT_MARGIN_LEVERAGE: z.coerce.number().default(1),
   STRATEGY_TYPE: z.string().default(StrategyType.Pair),
   STRATEGY_TRADE_SYMBOL: z.string().default('BTCUSDT'),
   STRATEGY_PRIMARY_FEED: z.string().default(FeedType.Binance),
   STRATEGY_EXTRA_FEEDS: z.string().default(''),
   STRATEGY_PARAMS: z.string().default('{}'),
+  STRATEGIES: z.string().default(''),
   RISK_NOTIONAL_LIMIT: z.coerce.number().default(1_000_000),
   RISK_MAX_POSITION: z.coerce.number().default(1),
   RISK_PRICE_BAND_MIN: z.coerce.number().default(0),
@@ -91,6 +94,8 @@ export const envSchema = z.object({
   DASHBOARD_DIST_DIR: z.string().optional(),
   BALANCE_SYNC_INTERVAL_MS: z.coerce.number().default(60_000),
   BALANCE_SYNC_DRIFT_BPS: z.coerce.number().default(200),
+  BALANCE_SYNC_MUTATES_LEDGER: booleanEnv.default(false),
+  ACCOUNTING_DEMO_BALANCE: z.coerce.number().default(1_000),
   REBALANCER_TARGETS: z.string().default('[]'),
   REBALANCER_INTERVAL_MS: z.coerce.number().default(300_000),
   REBALANCER_AUTO_EXECUTE: booleanEnv.default(false),
@@ -297,7 +302,9 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
   },
   accounting: {
     balanceSyncIntervalMs: env.BALANCE_SYNC_INTERVAL_MS,
-    balanceSyncMaxDriftBps: env.BALANCE_SYNC_DRIFT_BPS
+    balanceSyncMaxDriftBps: env.BALANCE_SYNC_DRIFT_BPS,
+    balanceSyncMutatesLedger: env.BALANCE_SYNC_MUTATES_LEDGER,
+    seedDemoBalance: env.ACCOUNTING_DEMO_BALANCE
   },
   rebalancer: {
     intervalMs: env.REBALANCER_INTERVAL_MS,
@@ -335,7 +342,13 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
           }
         : undefined
   },
-  strategy: buildStrategyConfig(env),
+  margin: {
+    spot: {
+      enabled: env.SPOT_MARGIN_ENABLED,
+      leverageCap: env.SPOT_MARGIN_LEVERAGE
+    }
+  },
+  strategies: buildStrategiesConfig(env),
   risk: buildRiskConfig(env)
 });
 
@@ -366,7 +379,14 @@ const buildStrategyConfig = (env: z.infer<typeof envSchema>) => {
     primaryFeed,
     extraFeeds,
     params
-  } satisfies StrategyConfig;
+} satisfies StrategyConfig;
+};
+
+const buildStrategiesConfig = (env: z.infer<typeof envSchema>) => {
+  const baseStrategy = buildStrategyConfig(env);
+  const baseRisk = buildRiskConfig(env);
+  const parsed = parseStrategies(env.STRATEGIES, baseStrategy, baseRisk);
+  return parsed;
 };
 
 const buildRiskConfig = (env: z.infer<typeof envSchema>) => {
@@ -384,13 +404,21 @@ const buildRiskConfig = (env: z.infer<typeof envSchema>) => {
   } satisfies RiskConfig;
 };
 
-const parseRebalanceTargets = (raw: string): RebalanceTarget[] => {
+const parseJsonArray = (raw: string, label: string): unknown[] => {
   try {
     const parsed = raw.trim() ? (JSON.parse(raw) as unknown) : [];
     if (!Array.isArray(parsed)) {
-      throw new Error('REBALANCER_TARGETS must be an array');
+      throw new Error(`${label} must be an array`);
     }
-    return parsed.map((entry) => {
+    return parsed;
+  } catch (error) {
+    throw new Error(`Invalid JSON for ${label}: ${(error as Error).message}`);
+  }
+};
+
+const parseRebalanceTargets = (raw: string): RebalanceTarget[] => {
+  try {
+    return parseJsonArray(raw, 'REBALANCER_TARGETS').map((entry) => {
       if (!entry || typeof entry !== 'object') {
         throw new Error('Each rebalance target must be an object');
       }
@@ -411,9 +439,135 @@ const parseRebalanceTargets = (raw: string): RebalanceTarget[] => {
       } satisfies RebalanceTarget;
     });
   } catch (error) {
-    throw new Error(`Invalid JSON for REBALANCER_TARGETS: ${(error as Error).message}`);
+    throw error;
   }
 };
+
+const parseStrategies = (
+  raw: string,
+  fallbackStrategy: StrategyConfig,
+  fallbackRisk: RiskConfig
+): StrategyDefinition[] => {
+  if (!raw.trim()) {
+    return [createFallbackStrategyDefinition(fallbackStrategy, fallbackRisk)];
+  }
+
+  const entries = parseJsonArray(raw, 'STRATEGIES');
+  if (!entries.length) {
+    return [createFallbackStrategyDefinition(fallbackStrategy, fallbackRisk)];
+  }
+
+  const seenIds = new Set<string>();
+  const definitions = entries.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`STRATEGIES[${index}] must be an object`);
+    }
+    return normalizeStrategyDefinition(entry as Record<string, unknown>, fallbackStrategy, fallbackRisk, index);
+  });
+
+  for (const def of definitions) {
+    if (seenIds.has(def.id)) {
+      throw new Error(`Duplicate strategy id '${def.id}' in STRATEGIES`);
+    }
+    seenIds.add(def.id);
+  }
+
+  return definitions;
+};
+
+const normalizeStrategyDefinition = (
+  entry: Record<string, unknown>,
+  fallbackStrategy: StrategyConfig,
+  fallbackRisk: RiskConfig,
+  index: number
+): StrategyDefinition => {
+  const id = typeof entry.id === 'string' && entry.id.trim().length ? entry.id.trim() : undefined;
+  if (!id) {
+    throw new Error(`STRATEGIES[${index}].id is required`);
+  }
+
+  const type = typeof entry.type === 'string' ? parseStrategyType(entry.type) : fallbackStrategy.type;
+  const tradeSymbolRaw = typeof entry.tradeSymbol === 'string' ? entry.tradeSymbol : fallbackStrategy.tradeSymbol;
+  const tradeSymbol = tradeSymbolRaw.toUpperCase();
+  const primaryFeed = typeof entry.primaryFeed === 'string'
+    ? parseFeedType(entry.primaryFeed)
+    : fallbackStrategy.primaryFeed;
+  const extraFeeds = Array.isArray(entry.extraFeeds)
+    ? entry.extraFeeds.map((feed, feedIdx) => {
+        if (typeof feed !== 'string') {
+          throw new Error(`STRATEGIES[${index}].extraFeeds[${feedIdx}] must be a string`);
+        }
+        return parseFeedType(feed);
+      })
+    : fallbackStrategy.extraFeeds;
+
+  const params = (entry.params && typeof entry.params === 'object' && !Array.isArray(entry.params)
+    ? (entry.params as Record<string, unknown>)
+    : fallbackStrategy.params) ?? {};
+
+  const mode = entry.mode === 'sandbox' ? 'sandbox' : 'live';
+  const priority = typeof entry.priority === 'number' ? entry.priority : 0;
+
+  const baseBudget = {
+    notional: fallbackRisk.notional,
+    maxPosition: fallbackRisk.maxPosition,
+    throttle: { ...fallbackRisk.throttle }
+  };
+
+  const budget = normalizeBudget(entry.budget, baseBudget);
+
+  return {
+    id,
+    mode,
+    priority,
+    type,
+    tradeSymbol,
+    primaryFeed,
+    extraFeeds,
+    params,
+    budget
+  } satisfies StrategyDefinition;
+};
+
+const normalizeBudget = (
+  rawBudget: unknown,
+  baseBudget: Required<StrategyBudgetConfig>
+): StrategyBudgetConfig => {
+  if (!rawBudget || typeof rawBudget !== 'object' || Array.isArray(rawBudget)) {
+    return baseBudget;
+  }
+  const budget = rawBudget as Record<string, unknown>;
+  const notional = typeof budget.notional === 'number' ? budget.notional : baseBudget.notional;
+  const maxPosition = typeof budget.maxPosition === 'number' ? budget.maxPosition : baseBudget.maxPosition;
+  let throttle = baseBudget.throttle;
+  if (budget.throttle && typeof budget.throttle === 'object' && !Array.isArray(budget.throttle)) {
+    const rawThrottle = budget.throttle as Record<string, unknown>;
+    throttle = {
+      windowMs: typeof rawThrottle.windowMs === 'number' ? rawThrottle.windowMs : baseBudget.throttle.windowMs,
+      maxCount: typeof rawThrottle.maxCount === 'number' ? rawThrottle.maxCount : baseBudget.throttle.maxCount
+    };
+  }
+  return { notional, maxPosition, throttle } satisfies StrategyBudgetConfig;
+};
+
+const createFallbackStrategyDefinition = (
+  strategy: StrategyConfig,
+  risk: RiskConfig
+): StrategyDefinition => ({
+  id: 'default',
+  mode: 'live',
+  priority: 0,
+  type: strategy.type,
+  tradeSymbol: strategy.tradeSymbol,
+  primaryFeed: strategy.primaryFeed,
+  extraFeeds: strategy.extraFeeds,
+  params: strategy.params,
+  budget: {
+    notional: risk.notional,
+    maxPosition: risk.maxPosition,
+    throttle: { ...risk.throttle }
+  }
+});
 
 export interface StrategyConfig {
   type: StrategyType;
@@ -439,7 +593,7 @@ interface RebalancerConfig {
   };
 }
 
-interface ExecutionPolicyConfig {
+export interface ExecutionPolicyConfig {
   mode: 'market' | 'limit' | 'makerPreferred' | 'takerOnDrift';
   defaultQty: number;
   limitOffsetBps: number;
@@ -461,6 +615,24 @@ interface ExecutionPolicyConfig {
 interface ExecutionConfig {
   account: string;
   policy: ExecutionPolicyConfig;
+}
+
+export type StrategyMode = 'live' | 'sandbox';
+
+export interface StrategyBudgetConfig {
+  notional?: number;
+  maxPosition?: number;
+  throttle?: {
+    windowMs: number;
+    maxCount: number;
+  };
+}
+
+export interface StrategyDefinition extends StrategyConfig {
+  id: string;
+  mode: StrategyMode;
+  priority: number;
+  budget: StrategyBudgetConfig;
 }
 
 export const loadConfigDetails = (overrides: EnvOverrides = {}): LoadedConfigDetails => {

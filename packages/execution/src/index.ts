@@ -142,7 +142,18 @@ export class PaperExecutionAdapter extends BaseExecutionAdapter {
   async submit(order: OrderNew) {
     const ts = this.clock.now();
     this.ack(order.id, ts);
-    this.fill(order, {}, ts);
+    const metaRecord = order.meta as Record<string, unknown> | undefined;
+    const metaPx = typeof metaRecord?.execRefPx === 'number' ? (metaRecord.execRefPx as number) : undefined;
+    const px = metaPx ?? order.px;
+    this.fill(
+      order,
+      px
+        ? {
+            px
+          }
+        : {},
+      ts
+    );
   }
 }
 

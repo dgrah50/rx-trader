@@ -229,6 +229,13 @@ maybeDescribe('runtime end-to-end integration', () => {
 
     // allow runtime subscriptions to attach before we emit ticks
     await new Promise((resolve) => setTimeout(resolve, 0));
+    const initialEvents = await eventStore.read();
+    const seedEvent = initialEvents.find(
+      (evt) =>
+        evt.type === 'account.balance.adjusted' &&
+        (evt.data as any)?.metadata?.seed === 'demo'
+    );
+    expect(seedEvent).toBeDefined();
 
     const baseTime = 1_000_000;
     const emit = (subject: Subject<MarketTick>, tick: MarketTick) => {
@@ -298,12 +305,13 @@ maybeDescribe('runtime end-to-end integration', () => {
 const mockBalanceProvider = (instrument: InstrumentMetadata): BalanceProvider => {
   const base = instrument.baseAsset ?? 'BTC';
   const quote = instrument.quoteAsset ?? 'USDT';
+  const venue = instrument.venue ?? 'paper';
   return {
-    venue: 'paper',
+    venue,
     async sync() {
       return [
-        { venue: 'paper', asset: base, available: 0.25, locked: 0 },
-        { venue: 'paper', asset: quote, available: 20_000, locked: 0 }
+        { venue, asset: base, available: 0.25, locked: 0 },
+        { venue, asset: quote, available: 20_000, locked: 0 }
       ];
     },
     stop() {}

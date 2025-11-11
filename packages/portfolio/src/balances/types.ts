@@ -18,12 +18,24 @@ export interface BalanceSyncOptions {
   accountId: string;
   provider: BalanceProvider;
   getBalance: (venue: string, asset: string) => BalanceEntry | undefined;
-  enqueue: (event: { id: string; type: 'account.balance.adjusted'; data: unknown; ts: number }) => void;
+  enqueue: (event: {
+    id: string;
+    type: 'account.balance.adjusted' | 'account.balance.snapshot';
+    data: unknown;
+    ts: number;
+  }) => void;
+  enqueueSnapshot?: (event: {
+    id: string;
+    type: 'account.balance.snapshot';
+    data: unknown;
+    ts: number;
+  }) => void;
   clock: Clock;
   intervalMs?: number;
   logger?: { info: (obj: Record<string, unknown>, msg: string) => void; warn: (obj: Record<string, unknown>, msg: string) => void; error: (obj: Record<string, unknown>, msg: string) => void };
   driftBpsThreshold?: number;
   instrumentation?: BalanceSyncInstrumentation;
+  applyLedgerDeltas?: boolean;
 }
 
 export interface BalanceSyncTelemetry {

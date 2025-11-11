@@ -90,6 +90,9 @@ rx run --live --dashboard
 ```
 If a venue lacks credentials, a mock adapter is used for that venue while everything else stays live.
 
+### Demo (multi-strategy)
+`rx env:demo --dashboard` seeds SQLite, hydrates `STRATEGIES` with the BTC momentum + Binance/Hyperliquid arbitrage pair, bootstraps the trader, launches the dashboard dev server, and wires the mock balance provider. The new **Strategy Mixer** in the dashboard lets you switch between strategies (or view “All”), filter positions/orders, and watch aggregated signals/intents/orders/fills/rejects plus last-activity timestamps per strategy.
+
 --
 
 ## Backtests and Benchmarks
@@ -135,10 +138,54 @@ Print the effective configuration:
 rx config print --json
 ```
 
+### Multiple strategies
+Set the `strategies` array (or `STRATEGIES` env var containing JSON) to register multiple strategy definitions with priorities, sandbox mode, and optional per-strategy budgets.
+
+```json
+{
+  "strategies": [
+    {
+      "id": "btc-momo",
+      "type": "MOMENTUM",
+      "tradeSymbol": "BTCUSDT",
+      "primaryFeed": "BINANCE",
+      "params": { "fastWindow": 5, "slowWindow": 20 },
+      "priority": 10,
+      "mode": "live",
+      "budget": {
+        "notional": 250000,
+        "maxPosition": 2,
+        "throttle": { "windowMs": 1000, "maxCount": 2 }
+      }
+    },
+    {
+      "id": "eth-btc-pair",
+      "type": "PAIR",
+      "tradeSymbol": "ETHUSDT",
+      "primaryFeed": "BINANCE",
+      "extraFeeds": ["HYPERLIQUID"],
+      "mode": "sandbox",
+      "priority": 5
+    }
+  ]
+}
+```
+Any missing budget fields inherit the global `risk_*` limits, and sandboxed strategies emit signals/metrics without submitting intents.
+
+Each strategy publishes telemetry (signals, intents, orders, fills, rejects, last-activity timestamps) that surfaces via `GET /status` (`runtime.strategies[]`) and powers the dashboard Strategy Mixer + CLI/ops tooling.
+
+> ℹ️ **Legacy env knobs:** the `STRATEGY_*` environment variables still exist, but they now only define the fallback entry in `config.strategies` when `STRATEGIES` is empty. Put real configurations in the `STRATEGIES` array (JSON string or `rx.config.json`) so everything—CLI, runtime, dashboard—reads from a single list.
+
+### Venue fee sync
+- `rx fees:sync --venue binance --product SPOT` pulls the latest maker/taker bps from Binance (requires API key/secret) and stores them in `market-structure.sqlite`.
+- `rx fees:sync --venue hyperliquid --product PERP` captures Hyperliquid fees (uses public metadata).  
+At runtime the execution policy automatically uses the stored fees per venue/symbol and falls back to the `INTENT_*` defaults when no entry exists.
+- Pre-trade risk budgets/account guards now incorporate those maker/taker fees (and reference prices from intent metadata) before approving orders, execution adapters annotate fills with the computed fee + liquidity, and the dashboard Strategy cards display the active tier/source so operators can confirm which schedule is live.
+
 --
 
 ## Control‑Plane API (selected)
-- `GET /status` – runtime status (mode, strategy, feed health, PnL summary)
+- `GET /status` – runtime status (live/paper, kill switch, feed health, PnL summary, **`runtime.strategies[]` telemetry for every configured strategy**)
 - `GET /positions`, `GET /pnl` – projections
 - `POST /orders` – enqueue a paper order; `POST /orders/:venue` – submit to a specific venue
 - `GET /events` / `GET /logs` – SSE streams for events and logs
@@ -170,3 +217,4 @@ bun x knip --no-config-hints # dead-code analysis (dashboard allowlisted)
 - Dashboard fetch errors (CORS): ensure the `GATEWAY_PORT` matches the control‑plane log; dev uses permissive CORS.
 - SQLite “database is locked”: the persistence worker backs off; increase `PERSIST_QUEUE_CAPACITY` or adjust busy timeout if needed.
 - Without creds: venues default to mock execution while still using real feeds.
+- `rx env:demo --dashboard` is the fastest path to see multi-strategy orchestration end-to-end (paper trading + dashboard Strategy Mixer); stop everything with `Ctrl+C`.

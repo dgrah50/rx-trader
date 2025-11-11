@@ -1,4 +1,4 @@
-import { merge, scan, map, shareReplay } from 'rxjs';
+import { merge, scan, map, shareReplay, EMPTY } from 'rxjs';
 import type { Observable } from 'rxjs';
 import type { Fill, MarketTick, PortfolioSnapshot } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
@@ -17,11 +17,11 @@ interface PortfolioState {
   realizedPnl: number;
 }
 
-const initialState: PortfolioState = {
+const createInitialState = (initialCash = 0): PortfolioState => ({
   positions: {},
-  cash: 0,
+  cash: initialCash,
   realizedPnl: 0
-};
+});
 
 const applyFill = (state: PortfolioState, fill: Fill): PortfolioState => {
   const current = state.positions[fill.symbol] ?? { qty: 0, avgPx: 0, realized: 0 };
@@ -71,22 +71,36 @@ const applyMark = (state: PortfolioState, tick: MarketTick): PortfolioState => {
 interface PortfolioStreams {
   fills$: Observable<Fill>;
   marks$: Observable<MarketTick>;
+  cashAdjustments$?: Observable<number>;
+  initialCash?: number;
 }
 
 export const portfolio$ = (
-  { fills$, marks$ }: PortfolioStreams,
+  { fills$, marks$, cashAdjustments$, initialCash }: PortfolioStreams,
   clock?: Clock
 ): Observable<PortfolioSnapshot> => {
   const now = clock?.now ?? systemClock.now;
-  return merge(
+  const reducers$ = merge(
     fills$.pipe(map((fill) => (state: PortfolioState) => applyFill(state, fill))),
-    marks$.pipe(map((tick) => (state: PortfolioState) => applyMark(state, tick)))
-  ).pipe(
+    marks$.pipe(map((tick) => (state: PortfolioState) => applyMark(state, tick))),
+    cashAdjustments$
+      ? cashAdjustments$.pipe(
+          map((delta) => (state: PortfolioState) => {
+            if (!Number.isFinite(delta) || delta === 0) {
+              return state;
+            }
+            state.cash += delta;
+            return state;
+          })
+        )
+      : EMPTY
+  );
+  return reducers$.pipe(
     scan((state, reducer) => reducer({
       positions: { ...state.positions },
       cash: state.cash,
       realizedPnl: state.realizedPnl
-    }), initialState),
+    }), createInitialState(initialCash)),
     map((state) => {
       const marked = Object.fromEntries(
         Object.entries(state.positions).map(([symbol, position]) => {

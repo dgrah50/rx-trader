@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { DomainEvent } from '@rx-trader/core/domain';
 import {
   positionsProjection,
   pnlProjection,
   balancesProjection,
   marginProjection,
+  balanceSnapshotsProjection,
   buildProjection
 } from './projections';
 import { InMemoryEventStore } from './eventStore';
@@ -118,6 +120,64 @@ describe('balancesProjection', () => {
     expect(state.balances.paper.USD.total).toBe(900);
     expect(state.balances.paper.USD.available).toBe(900);
     expect(state.updatedAt).toBeGreaterThan(0);
+  });
+
+  it('uses newTotal when provided and validates delta consistency', () => {
+    const state = balancesProjection.init();
+    const baseEvent = {
+      id: crypto.randomUUID(),
+      type: 'account.balance.adjusted' as const,
+      ts: Date.now(),
+      data: {
+        id: crypto.randomUUID(),
+        t: Date.now(),
+        accountId: 'paper',
+        venue: 'paper',
+        asset: 'USD',
+        delta: 1_000,
+        newTotal: 1_000,
+        reason: 'sync'
+      }
+    } satisfies DomainEvent<'account.balance.adjusted'>;
+    balancesProjection.reduce(state, baseEvent);
+    expect(state.balances.paper.USD.total).toBe(1_000);
+
+    const inconsistent = {
+      ...baseEvent,
+      data: {
+        ...baseEvent.data,
+        delta: 100,
+        newTotal: 1_500
+      }
+    } satisfies DomainEvent<'account.balance.adjusted'>;
+
+    expect(() => balancesProjection.reduce(state, inconsistent)).toThrow(/Balance delta mismatch/);
+  });
+});
+
+describe('balanceSnapshotsProjection', () => {
+  it('stores snapshot metadata per venue/asset', async () => {
+    const store = new InMemoryEventStore();
+    await store.append({
+      id: crypto.randomUUID(),
+      type: 'account.balance.snapshot',
+      ts: Date.now(),
+      data: {
+        id: crypto.randomUUID(),
+        t: Date.now(),
+        accountId: 'paper',
+        venue: 'paper',
+        asset: 'USD',
+        total: 1000,
+        provider: 'mock',
+        ledgerTotal: 950,
+        drift: 50
+      }
+    });
+
+    const state = await buildProjection(store, balanceSnapshotsProjection);
+    expect(state.snapshots.paper.USD.total).toBe(1000);
+    expect(state.snapshots.paper.USD.drift).toBe(50);
   });
 });
 

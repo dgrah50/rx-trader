@@ -8,6 +8,8 @@ interface MockBalanceProviderOptions {
   quoteAsset: string;
   marks$?: Observable<MarketTick>;
   fallbackPrice?: number;
+  initialBase?: number;
+  initialQuote?: number;
 }
 
 export class MockBalanceProvider implements BalanceProvider {
@@ -15,6 +17,8 @@ export class MockBalanceProvider implements BalanceProvider {
   private latestPrice: number;
   private readonly baseAsset: string;
   private readonly quoteAsset: string;
+  private readonly initialBase: number;
+  private readonly initialQuote: number;
   private readonly subscription?: Subscription;
 
   constructor(options: MockBalanceProviderOptions) {
@@ -22,6 +26,8 @@ export class MockBalanceProvider implements BalanceProvider {
     this.baseAsset = options.baseAsset;
     this.quoteAsset = options.quoteAsset;
     this.latestPrice = options.fallbackPrice ?? 100;
+    this.initialBase = Math.max(0, options.initialBase ?? 0);
+    this.initialQuote = Math.max(0, options.initialQuote ?? 1000);
     if (options.marks$) {
       this.subscription = options.marks$.subscribe((tick) => {
         const px = pickPrice(tick);
@@ -33,24 +39,22 @@ export class MockBalanceProvider implements BalanceProvider {
   }
 
   async sync(): Promise<BalanceSnapshot[]> {
-    const price = this.latestPrice || 100;
-    const volatility = Math.abs(Math.sin(price / 10_000)) + 0.1;
-    const baseTotal = Number((volatility * 0.75).toFixed(4));
-    const baseLocked = Number((baseTotal * 0.1).toFixed(4));
-    const quoteTotal = Number((baseTotal * price * 3).toFixed(2));
-    const quoteLocked = Number((quoteTotal * 0.05).toFixed(2));
+    // Demo-friendly deterministic balances. Start with a fixed quote stash and flat base.
+    // Fills will move these via accounting events; subsequent syncs should only correct drift.
+    const baseTotal = this.initialBase;
+    const quoteTotal = this.initialQuote;
     return [
       {
         venue: this.venue,
         asset: this.baseAsset,
-        available: baseTotal - baseLocked,
-        locked: baseLocked
+        available: baseTotal,
+        locked: 0
       },
       {
         venue: this.venue,
         asset: this.quoteAsset,
-        available: quoteTotal - quoteLocked,
-        locked: quoteLocked
+        available: quoteTotal,
+        locked: 0
       }
     ];
   }

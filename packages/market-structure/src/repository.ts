@@ -1,17 +1,18 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, or } from 'drizzle-orm';
 import {
   currencyPairTable,
   currencyTable,
   exchangeCurrencyTable,
   exchangePairTable,
   exchangeTable,
+  feeScheduleTable,
   marketStructureSnapshotTable,
   type AssetClass,
   type ContractType
 } from './schema';
 import type { MarketStructureDatabase } from './db';
 import type { ExchangePair, Exchange, CurrencyPair } from './schema';
-import type { ExchangePairRecord } from './types';
+import type { ExchangePairRecord, FeeScheduleUpsert } from './types';
 
 type ExchangePairRow = {
   exch_ccy_pair: ExchangePair;
@@ -242,6 +243,89 @@ export class MarketStructureRepository {
       payload,
       snapshotHash: hash
     });
+  }
+
+  async upsertFeeSchedules(entries: FeeScheduleUpsert[]) {
+    for (const entry of entries) {
+      await this.upsertFeeSchedule(entry);
+    }
+  }
+
+  async upsertFeeSchedule(entry: FeeScheduleUpsert) {
+    const exchangeId = await this.getExchangeId(entry.exchangeCode);
+    await this.db
+      .insert(feeScheduleTable)
+      .values({
+        exchId: exchangeId,
+        symbol: entry.symbol.toUpperCase(),
+        productType: entry.productType,
+        tier: entry.tier ?? 'default',
+        makerBps: entry.makerBps,
+        takerBps: entry.takerBps,
+        effectiveFrom: entry.effectiveFrom,
+        effectiveTo: entry.effectiveTo ?? null,
+        source: entry.source ?? 'manual',
+        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null
+      })
+      .onConflictDoUpdate({
+        target: [
+          feeScheduleTable.exchId,
+          feeScheduleTable.symbol,
+          feeScheduleTable.productType,
+          feeScheduleTable.tier,
+          feeScheduleTable.effectiveFrom
+        ],
+        set: {
+          makerBps: entry.makerBps,
+          takerBps: entry.takerBps,
+          effectiveTo: entry.effectiveTo ?? null,
+          source: entry.source ?? 'manual',
+          metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
+          updatedAt: Math.floor(Date.now() / 1000)
+        }
+      });
+  }
+
+  async getFeeSchedule(
+    exchangeCode: string,
+    symbol: string,
+    productType: string,
+    asOfMs: number = Date.now()
+  ) {
+    const exchangeId = await this.getExchangeId(exchangeCode);
+    const asOf = Math.floor(asOfMs / 1000);
+    const rows = await this.db
+      .select()
+      .from(feeScheduleTable)
+      .where(
+        and(
+          eq(feeScheduleTable.exchId, exchangeId),
+          eq(feeScheduleTable.symbol, symbol.toUpperCase()),
+          eq(feeScheduleTable.productType, productType),
+          lte(feeScheduleTable.effectiveFrom, asOf),
+          or(isNull(feeScheduleTable.effectiveTo), gte(feeScheduleTable.effectiveTo, asOf))
+        )
+      )
+      .orderBy(desc(feeScheduleTable.effectiveFrom))
+      .limit(1);
+    if (rows[0]) {
+      return rows[0];
+    }
+    const wildcard = await this.db
+      .select()
+      .from(feeScheduleTable)
+      .where(
+        and(
+          eq(feeScheduleTable.exchId, exchangeId),
+          eq(feeScheduleTable.symbol, '*'),
+          eq(feeScheduleTable.productType, productType),
+          lte(feeScheduleTable.effectiveFrom, asOf),
+          or(isNull(feeScheduleTable.effectiveTo), gte(feeScheduleTable.effectiveTo, asOf))
+        )
+      )
+      .orderBy(desc(feeScheduleTable.effectiveFrom))
+      .limit(1);
+    return wildcard[0] ?? null;
   }
 
   private async getExchangeId(code: string) {

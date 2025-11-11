@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-
-export interface EventMessage {
-  id: string;
-  type: string;
-  payload: unknown;
-  ts: number;
-}
+import type { EventMessage } from './types';
 
 const resolveGatewayBaseUrl = () => {
   if (import.meta.env.VITE_GATEWAY_URL) {

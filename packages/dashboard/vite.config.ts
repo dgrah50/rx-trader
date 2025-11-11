@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
 
 const gatewayTarget = process.env.VITE_GATEWAY_PROXY ?? 'http://localhost:8080';
 
@@ -13,34 +14,33 @@ const proxiedPaths = [
   '/backtest',
   '/feeds',
   '/snapshot',
-  '/config'
+  '/config',
 ];
 
-const proxy = proxiedPaths.reduce<Record<string, { target: string; changeOrigin: boolean; ws?: boolean }>>(
-  (acc, path) => {
-    acc[path] = {
-      target: gatewayTarget,
-      changeOrigin: true,
-      ws: path === '/events' || path === '/logs'
-    };
-    return acc;
-  },
-  {}
-);
+const proxy = proxiedPaths.reduce<
+  Record<string, { target: string; changeOrigin: boolean; ws?: boolean }>
+>((acc, path) => {
+  acc[path] = {
+    target: gatewayTarget,
+    changeOrigin: true,
+    ws: path === '/events' || path === '/logs',
+  };
+  return acc;
+}, {});
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     port: 5173,
-    proxy
+    proxy,
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: true,
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src')
-    }
-  }
+      '@': path.resolve(__dirname, 'src'),
+    },
+  },
 });

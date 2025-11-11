@@ -19,6 +19,8 @@ import {
   createMarketStructureStore,
   MarketStructureRepository,
   syncMarketStructure,
+  syncFeeSchedules,
+  type FeeSyncVenue,
 } from '@rx-trader/market-structure';
 import { fetchBinanceMarketStructure } from '@rx-trader/market-structure/adapters/binance';
 import { fetchHyperliquidMarketStructure } from '@rx-trader/market-structure/adapters/hyperliquid';
@@ -82,12 +84,30 @@ const seedDemoEventStore = async (config: AppConfig, dryRun: boolean) => {
   );
   if (dryRun) return;
   const store = await createEventStore(config);
+  const primaryStrategy = config.strategies[0];
+  const symbol = primaryStrategy?.tradeSymbol ?? 'BTCUSDT';
+  const venue = primaryStrategy?.venue ?? 'paper';
+  const quoteAsset = primaryStrategy?.quoteAsset ?? 'USDT';
+  await store.append({
+    id: crypto.randomUUID(),
+    type: 'account.balance.adjusted',
+    data: safeParse(accountBalanceAdjustedSchema, {
+      id: crypto.randomUUID(),
+      t: Date.now(),
+      accountId: config.execution.account,
+      venue,
+      asset: quoteAsset,
+      delta: 1_000,
+      reason: 'deposit'
+    }),
+    ts: Date.now()
+  });
   await store.append({
     id: crypto.randomUUID(),
     type: 'market.tick',
     data: safeParse(marketTickSchema, {
       t: Date.now(),
-      symbol: config.strategy.tradeSymbol,
+      symbol,
       bid: 100,
       ask: 100.1,
     }),
@@ -128,19 +148,42 @@ export const buildProgram = (): Command => {
     }
   };
 
+  const forwardOutput = (stream: ReadableStream | undefined, label: string) => {
+    if (!stream) return;
+    const decoder = new TextDecoder();
+    stream
+      .pipeTo(
+        new WritableStream({
+          write(chunk) {
+            const text = decoder.decode(chunk);
+            text
+              .split(/\r?\n/)
+              .filter((line) => line.trim().length)
+              .forEach((line) => {
+                console.log(`${label} ${line}`);
+              });
+          }
+        })
+      )
+      .catch(() => {});
+  };
+
   const startDashboardDevServer = (options: { gatewayUrl: string; port: number }) => {
     const env = {
       ...process.env,
       VITE_GATEWAY_URL: options.gatewayUrl,
       VITE_GATEWAY_PROXY: options.gatewayUrl,
     };
-    return Bun.spawn({
+    const proc = Bun.spawn({
       cmd: ['bun', 'run', 'dev', '--', '--port', String(options.port)],
       cwd: 'packages/dashboard',
-      stdout: 'inherit',
-      stderr: 'inherit',
-      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env
     });
+    forwardOutput(proc.stdout, '[dashboard]');
+    forwardOutput(proc.stderr, '[dashboard]');
+    return proc;
   };
 
   const openBrowser = (url: string) => {
@@ -307,6 +350,38 @@ export const buildProgram = (): Command => {
     .argument('<file>', 'path to parquet file')
     .action(async (file) => {
       await runBun('scripts/import-parquet.ts', file);
+    });
+
+  program
+    .command('fees:sync')
+    .description('Fetch venue trading fees and store them in market-structure SQLite')
+    .requiredOption('--venue <code>', 'Exchange code (binance|hyperliquid)')
+    .option('--product <type>', 'Product type (SPOT|PERP)', 'SPOT')
+    .option('--sqlite <file>', 'Path to market-structure SQLite DB', 'market-structure.sqlite')
+    .action(async (opts) => {
+      const venue = String(opts.venue).toLowerCase() as FeeSyncVenue;
+      if (venue !== 'binance' && venue !== 'hyperliquid') {
+        throw new Error(`Unsupported venue '${opts.venue}' for fees:sync`);
+      }
+      const sqlitePath = opts.sqlite ?? 'market-structure.sqlite';
+      const store = createMarketStructureStore(sqlitePath);
+      const repo = new MarketStructureRepository(store.db);
+      try {
+        const count = await syncFeeSchedules({
+          repo,
+          venue,
+          productType: opts.product,
+          timestamp: Date.now(),
+          binance: {
+            apiKey: process.env.BINANCE_API_KEY,
+            apiSecret: process.env.BINANCE_API_SECRET
+          },
+          hyperliquid: {}
+        });
+        console.log(`[fees] upserted ${count} entries for ${venue} in ${sqlitePath}`);
+      } finally {
+        store.close();
+      }
     });
 
   const configCommand = program.command('config').description('Inspect configuration');
@@ -887,6 +962,58 @@ export const buildProgram = (): Command => {
       }
       if (!process.env.INTENT_DEFAULT_QTY) {
         process.env.INTENT_DEFAULT_QTY = selectedFeed === FeedType.Binance ? '0.001' : '1';
+      }
+
+      if (!process.env.STRATEGIES) {
+        const demoStrategies = [
+          {
+            id: 'momentum-main',
+            type: StrategyType.Momentum,
+            tradeSymbol,
+            primaryFeed: selectedFeed,
+            extraFeeds: [],
+            mode: 'live',
+            priority: 10,
+            params: {
+              fastWindow: 5,
+              slowWindow: 20,
+              minConsensus: 1,
+              maxSignalAgeMs: 2_000,
+              minActionIntervalMs: 1_000,
+            },
+            budget: {
+              notional: 250_000,
+              maxPosition: 2,
+              throttle: { windowMs: 1_000, maxCount: 2 },
+            },
+          },
+          {
+            id: 'arb-binance-hl',
+            type: StrategyType.Arbitrage,
+            tradeSymbol,
+            primaryFeed: FeedType.Binance,
+            extraFeeds: [FeedType.Hyperliquid],
+            mode: 'live',
+            priority: 6,
+            params: {
+              primaryVenue: FeedType.Binance,
+              secondaryVenue: FeedType.Hyperliquid,
+              spreadBps: 3,
+              maxAgeMs: 3_000,
+              minIntervalMs: 200,
+              priceSource: 'mid',
+              maxSkewBps: 15,
+              sizeBps: 25,
+              minEdgeBps: 1,
+            },
+            budget: {
+              notional: 150_000,
+              maxPosition: 2,
+              throttle: { windowMs: 500, maxCount: 4 },
+            },
+          },
+        ];
+        process.env.STRATEGIES = JSON.stringify(demoStrategies);
       }
 
       const envPref = process.env.RX_RUN_DASHBOARD;

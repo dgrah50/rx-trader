@@ -6,6 +6,7 @@ import {
   type RiskLimits,
   type AccountExposureGuard
 } from './preTrade';
+import { createMarketExposureGuard } from './marketExposureGuard';
 import { createManualClock } from '@rx-trader/core/time';
 
 const limits: RiskLimits = {
@@ -47,6 +48,10 @@ describe('createPreTradeRisk', () => {
     expect(bandDecision.allowed).toBe(false);
     expect(bandDecision.reasons).toContain('price-band');
 
+    const marketBandDecision = engine({ ...baseOrder, type: 'MKT', px: undefined, meta: { execRefPx: 150 } });
+    expect(marketBandDecision.allowed).toBe(false);
+    expect(marketBandDecision.reasons).toContain('price-band');
+
     const throttleDecision = engine({ ...baseOrder, id: 'order-2' });
     expect(throttleDecision.allowed).toBe(false);
     expect(throttleDecision.reasons).toContain('throttle');
@@ -54,6 +59,20 @@ describe('createPreTradeRisk', () => {
     clock.advance(limits.throttle.windowMs + 1);
     const postThrottle = engine({ ...baseOrder, id: 'order-3' });
     expect(postThrottle.allowed).toBe(true);
+  });
+
+  it('uses execRefPx and expected fees when computing notional budgets', () => {
+    const engine = createPreTradeRisk(limits);
+    const marketOrder = {
+      ...baseOrder,
+      type: 'MKT' as const,
+      px: undefined,
+      qty: 9,
+      meta: { execRefPx: 120, expectedFeeBps: 50 }
+    };
+    const decision = engine(marketOrder);
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasons).toContain('notional>1000');
   });
 
   it('rejects orders when account balances are insufficient', () => {
@@ -75,10 +94,105 @@ describe('createPreTradeRisk', () => {
     expect(insufficientQuote.allowed).toBe(false);
     expect(insufficientQuote.reasons).toContain('insufficient-quote');
 
+    const nearEdgeGuard: AccountExposureGuard = {
+      ...guard,
+      getAvailable: (venue, asset) => {
+        if (venue !== 'paper') return null;
+        if (asset === 'USD') return 500;
+        if (asset === 'SIM') return 5;
+        return null;
+      }
+    };
+    const feeAwareEngine = createPreTradeRisk(limits, clock.now, nearEdgeGuard);
+    const quoteTightOrder = {
+      ...baseOrder,
+      qty: 5,
+      px: 100,
+      meta: { expectedFeeBps: 20 }
+    };
+    const quoteDecision = feeAwareEngine(quoteTightOrder);
+    expect(quoteDecision.allowed).toBe(false);
+    expect(quoteDecision.reasons).toContain('insufficient-quote');
+
     const sellOrder = { ...baseOrder, side: 'SELL' as const, qty: 5 };
     const sellDecision = engine(sellOrder);
     expect(sellDecision.allowed).toBe(false);
     expect(sellDecision.reasons).toContain('insufficient-base');
+  });
+
+  it('blocks buys that exceed available quote balance', () => {
+    const guard: AccountExposureGuard = {
+      venue: 'paper',
+      baseAsset: 'SIM',
+      quoteAsset: 'USD',
+      getAvailable: (venue, asset) => {
+        if (venue !== 'paper') return null;
+        if (asset === 'USD') return 200;
+        if (asset === 'SIM') return 0;
+        return null;
+      }
+    };
+    const engine = createPreTradeRisk(limits, undefined, guard);
+    const decision = engine({ ...baseOrder, qty: 3, px: 80 });
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasons).toContain('insufficient-quote');
+  });
+
+  it('allows margin shorts within leverage budget and blocks beyond', () => {
+    const marginGuard = createMarketExposureGuard({
+      productType: 'SPOT',
+      venue: 'paper',
+      baseAsset: 'SIM',
+      quoteAsset: 'USD',
+      leverageCap: 2,
+      getAvailable: () => 500
+    });
+    const engine = createPreTradeRisk(limits, undefined, undefined, marginGuard);
+    const shortOk = engine({ ...baseOrder, side: 'SELL', qty: 2, px: 100 });
+    expect(shortOk.allowed).toBe(true);
+    const shortExceeded = engine({ ...baseOrder, id: 'order-spot-margin', side: 'SELL', qty: 9, px: 100 });
+    expect(shortExceeded.allowed).toBe(false);
+    expect(shortExceeded.reasons).toContain('insufficient-balance');
+  });
+
+  it('tracks perp margin usage and prevents exceeding collateral', () => {
+    const perpGuard = createMarketExposureGuard({
+      productType: 'PERP',
+      venue: 'paper',
+      baseAsset: 'SIM',
+      quoteAsset: 'USD',
+      leverageCap: 1,
+      getAvailable: () => 800
+    });
+    const engine = createPreTradeRisk(limits, undefined, undefined, perpGuard);
+    const first = engine({ ...baseOrder, side: 'SELL', qty: 4, px: 100 });
+    expect(first.allowed).toBe(true);
+    const second = engine({ ...baseOrder, id: 'order-perp-2', side: 'SELL', qty: 5, px: 100 });
+    expect(second.allowed).toBe(false);
+    expect(second.reasons).toContain('insufficient-balance');
+  });
+
+  it('blocks market orders that exceed quote balance', () => {
+    const guard: AccountExposureGuard = {
+      venue: 'binance',
+      baseAsset: 'BTC',
+      quoteAsset: 'USDT',
+      getAvailable: (venue, asset) => {
+        if (venue !== 'binance') return null;
+        if (asset === 'USDT') return 500;
+        return 1;
+      }
+    };
+    const engine = createPreTradeRisk(limits, undefined, guard);
+    const marketOrder = {
+      ...baseOrder,
+      type: 'MKT' as const,
+      px: undefined,
+      meta: { execRefPx: 200 }
+    };
+    const decision = engine(marketOrder);
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasons).toContain('insufficient-quote');
   });
 });
 

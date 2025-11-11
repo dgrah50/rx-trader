@@ -32,9 +32,23 @@ export const accountBalanceAdjustedSchema = z.object({
   venue: venueSchema,
   asset: symbolSchema,
   delta: z.number(),
+  newTotal: z.number().optional(),
   reason: z
     .enum(['deposit', 'withdrawal', 'funding', 'transfer', 'fee', 'manual', 'fill', 'sync'])
     .default('manual'),
+  metadata: z.record(z.unknown()).optional()
+});
+
+export const accountBalanceSnapshotSchema = z.object({
+  id: uuidSchema,
+  t: timestampSchema,
+  accountId: accountIdSchema,
+  venue: venueSchema,
+  asset: symbolSchema,
+  total: z.number(),
+  provider: z.string().min(1),
+  ledgerTotal: z.number(),
+  drift: z.number(),
   metadata: z.record(z.unknown()).optional()
 });
 export const accountMarginUpdatedSchema = z.object({

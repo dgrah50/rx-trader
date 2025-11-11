@@ -138,4 +138,31 @@ describe('createIntentBuilder', () => {
     emit();
     expect(intents).toHaveLength(2);
   });
+
+  it('annotates intents with the strategy id when provided', () => {
+    const marks$ = new Subject<MarketTick>();
+    const signals$ = new Subject<StrategySignal>();
+    const intents: any[] = [];
+
+    const build = createIntentBuilder({
+      account: 'ACC',
+      strategyId: 'strat-demo',
+      policy: {
+        mode: 'market',
+        defaultQty: 1,
+        minEdgeBps: 0,
+        takerFeeBps: 0,
+        takerSlipBps: 0,
+        tif: 'IOC'
+      }
+    });
+
+    build(signals$, marks$).subscribe((order) => intents.push(order));
+
+    marks$.next({ t: 1, symbol: 'BTCUSDT', bid: 100, ask: 100.2 });
+    signals$.next({ symbol: 'BTCUSDT', action: 'BUY', px: 101, t: 2 });
+
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.meta?.strategyId).toBe('strat-demo');
+  });
 });

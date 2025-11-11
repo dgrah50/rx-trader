@@ -3,7 +3,8 @@ import type {
   ContractType,
   CurrencyPair,
   Exchange,
-  ExchangePair
+  ExchangePair,
+  FeeSchedule
 } from './schema';
 
 export interface VenueCurrency {
@@ -71,3 +72,18 @@ export type ExchangePairRecord = {
   exchange: Exchange;
   pair: CurrencyPair;
 };
+
+export interface FeeScheduleUpsert {
+  exchangeCode: string;
+  symbol: string;
+  productType: string;
+  tier?: string;
+  makerBps: number;
+  takerBps: number;
+  effectiveFrom: number;
+  effectiveTo?: number | null;
+  source?: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+export type FeeScheduleRecord = FeeSchedule;

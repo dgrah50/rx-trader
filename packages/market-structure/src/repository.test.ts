@@ -41,4 +41,24 @@ describe('MarketStructureRepository', () => {
     expect(result?.exchangePair.lotSize).toBeCloseTo(0.001);
     close();
   });
+
+  it('stores and retrieves fee schedules', async () => {
+    const { repo, close } = makeRepo();
+    await repo.ensureExchange({ code: 'binance', name: 'Binance' });
+    const effectiveFrom = Math.floor(Date.now() / 1000) - 60;
+    await repo.upsertFeeSchedule({
+      exchangeCode: 'binance',
+      symbol: 'BTCUSDT',
+      productType: 'SPOT',
+      makerBps: 1.5,
+      takerBps: 2.5,
+      effectiveFrom,
+      source: 'test'
+    });
+
+    const schedule = await repo.getFeeSchedule('binance', 'BTCUSDT', 'SPOT');
+    expect(schedule?.makerBps).toBeCloseTo(1.5);
+    expect(schedule?.source).toBe('test');
+    close();
+  });
 });
