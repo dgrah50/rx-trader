@@ -55,6 +55,7 @@ export interface PortfolioSnapshot {
   realized: number;
   unrealized: number;
   cash: number;
+  feesPaid: number;
 }
 
 export const portfolioSnapshotSchema = z.object({
@@ -64,7 +65,8 @@ export const portfolioSnapshotSchema = z.object({
   pnl: z.number(),
   realized: z.number(),
   unrealized: z.number(),
-  cash: z.number()
+  cash: z.number(),
+  feesPaid: z.number().default(0)
 });
 
 export interface PortfolioAnalytics {
@@ -77,6 +79,7 @@ export interface PortfolioAnalytics {
   peakNav: number;
   drawdown: number;
   drawdownPct: number;
+  feesPaid: number;
   symbols: Record<
     string,
     {
@@ -101,6 +104,7 @@ export const portfolioAnalyticsSchema = z.object({
   peakNav: z.number(),
   drawdown: z.number(),
   drawdownPct: z.number(),
+  feesPaid: z.number().default(0),
   symbols: z.record(
     z.object({
       symbol: symbolSchema,

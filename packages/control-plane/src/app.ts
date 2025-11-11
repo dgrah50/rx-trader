@@ -422,6 +422,7 @@ const handleCorsPreflight = (request: Request) => {
         nav: pnlSnapshot?.nav ?? null,
         realized: pnlSnapshot?.realized ?? null,
         unrealized: pnlSnapshot?.unrealized ?? null,
+        feesPaid: pnlSnapshot?.feesPaid ?? null,
         eventSubscribers: subscribers.size,
         logSubscribers: logSubscribers.size,
         lastEventTs,

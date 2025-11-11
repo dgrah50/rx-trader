@@ -15,12 +15,14 @@ interface PortfolioState {
   positions: Record<string, PositionState>;
   cash: number;
   realizedPnl: number;
+  feesPaid: number;
 }
 
 const createInitialState = (initialCash = 0): PortfolioState => ({
   positions: {},
   cash: initialCash,
-  realizedPnl: 0
+  realizedPnl: 0,
+  feesPaid: 0
 });
 
 const applyFill = (state: PortfolioState, fill: Fill): PortfolioState => {
@@ -51,9 +53,10 @@ const applyFill = (state: PortfolioState, fill: Fill): PortfolioState => {
 
   state.positions[fill.symbol] = { qty: nextQty, avgPx: nextAvg, mark: fill.px, realized: realizedForSymbol };
   state.cash -= fill.px * signedQty;
-  if (fill.fee) {
+  if (fill.fee && fill.fee > 0) {
     state.cash -= fill.fee;
     state.realizedPnl -= fill.fee;
+    state.feesPaid += fill.fee;
     realizedForSymbol -= fill.fee;
     state.positions[fill.symbol].realized = realizedForSymbol;
   }
@@ -96,11 +99,15 @@ export const portfolio$ = (
       : EMPTY
   );
   return reducers$.pipe(
-    scan((state, reducer) => reducer({
-      positions: { ...state.positions },
-      cash: state.cash,
-      realizedPnl: state.realizedPnl
-    }), createInitialState(initialCash)),
+    scan((state, reducer) =>
+      reducer({
+        positions: { ...state.positions },
+        cash: state.cash,
+        realizedPnl: state.realizedPnl,
+        feesPaid: state.feesPaid
+      }),
+      createInitialState(initialCash)
+    ),
     map((state) => {
       const marked = Object.fromEntries(
         Object.entries(state.positions).map(([symbol, position]) => {
@@ -130,7 +137,8 @@ export const portfolio$ = (
         pnl: state.realizedPnl + unrealized,
         realized: state.realizedPnl,
         unrealized,
-        cash: state.cash
+        cash: state.cash,
+        feesPaid: state.feesPaid
       } satisfies PortfolioSnapshot;
     }),
     shareReplay({ bufferSize: 1, refCount: true })

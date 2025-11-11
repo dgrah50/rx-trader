@@ -33,6 +33,7 @@ const snapshotEvent = (overrides: Partial<any> = {}) => ({
     realized: 0,
     unrealized: 1,
     cash: 0,
+    feesPaid: 0,
     ...overrides
   }
 });
@@ -65,6 +66,7 @@ describe('pnlProjection', () => {
         peakNav: 1005,
         drawdown: -5,
         drawdownPct: -0.005,
+        feesPaid: 2,
         symbols: {
           SIM: {
             symbol: 'SIM',

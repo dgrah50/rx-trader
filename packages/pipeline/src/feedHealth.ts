@@ -69,6 +69,14 @@ export class FeedHealthTracker {
       ageSeconds
     };
   }
+
+  dispose() {
+    registry.delete(this.id);
+    if (registry.size === 0 && sampler) {
+      clearInterval(sampler);
+      sampler = null;
+    }
+  }
 }
 
 export const getFeedHealthSnapshots = (): FeedHealthSnapshot[] => {

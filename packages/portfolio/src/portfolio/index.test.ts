@@ -47,6 +47,7 @@ describe('portfolio$', () => {
     expect(last?.unrealized).toBeCloseTo(10);
     expect(last?.pnl).toBeCloseTo(20); // realized 10 + unrealized 10 (mark from latest fill)
     expect(last?.nav).toBeCloseTo(20); // cash + mark value
+    expect(last?.feesPaid).toBeCloseTo(0);
   });
 
   it('handles partial closes and fees', () => {
@@ -73,6 +74,29 @@ describe('portfolio$', () => {
     expect(last.realized).toBeCloseTo(4);
     expect(last.unrealized).toBeCloseTo(-5);
     expect(last.pnl).toBeCloseTo(-1);
+    expect(last.feesPaid).toBeCloseTo(1);
+  });
+
+  it('reduces NAV and cash by paid fees', () => {
+    const clock = createManualClock(0);
+    const fills$ = new Subject<Fill>();
+    const marks$ = new Subject<MarketTick>();
+    const snapshots: PortfolioSnapshot[] = [];
+
+    const subscription = portfolio$({ fills$, marks$ }, clock).subscribe((snapshot) =>
+      snapshots.push(snapshot)
+    );
+
+    clock.advance(1);
+    fills$.next(createFill(clock, { qty: 1, px: 100, side: 'BUY', fee: 2 }));
+
+    subscription.unsubscribe();
+
+    const last = snapshots.at(-1)!;
+    expect(last.cash).toBeCloseTo(-102);
+    expect(last.positions.SIM.pos).toBe(1);
+    expect(last.nav).toBeCloseTo(-2); // 100 notional - 102 cash
+    expect(last.feesPaid).toBeCloseTo(2);
   });
 
   it('supports short positions and marks', () => {
@@ -97,6 +121,7 @@ describe('portfolio$', () => {
     expect(last.unrealized).toBeCloseTo(10);
     expect(last.pnl).toBeCloseTo(10); // short profit
     expect(last.nav).toBeCloseTo(10);
+    expect(last.feesPaid).toBeCloseTo(0);
   });
   it('stamps snapshots with injected clock time', () => {
     const clock = createManualClock(1_000);

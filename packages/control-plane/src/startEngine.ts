@@ -539,6 +539,11 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     exitSubscriptions.forEach((sub) => sub.unsubscribe());
     exitHandles.forEach((handle) => handle.stop());
     exitIntentSink.complete();
+    try {
+      feedManager.stop();
+    } catch (error) {
+      logger?.warn?.({ error }, 'Failed to stop feed manager');
+    }
     persistence.shutdown();
     marketStore.close();
     stopAccounting();

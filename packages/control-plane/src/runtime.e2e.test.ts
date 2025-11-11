@@ -7,7 +7,8 @@ import type {
   DomainEvent,
   OrderAck,
   OrderReject,
-  PortfolioSnapshot
+  PortfolioSnapshot,
+  PortfolioAnalytics
 } from '@rx-trader/core/domain';
 import { FeedType } from '@rx-trader/core/constants';
 import { InMemoryEventStore } from '@rx-trader/event-store';
@@ -22,6 +23,7 @@ import type { EngineDependencies } from './startEngine';
 import { createManualClock } from '@rx-trader/core/time';
 import type { BalanceProvider } from '@rx-trader/portfolio';
 import type { InstrumentMetadata } from '@rx-trader/pipeline';
+import type { StrategySignal } from '@rx-trader/strategies';
 
 const runE2E = process.env.RUN_E2E_TESTS === 'true';
 const debugE2E = process.env.DEBUG_E2E === 'true';
@@ -144,6 +146,25 @@ maybeDescribe('runtime end-to-end integration', () => {
       assetClass: 'CRYPTO',
       contractType: 'SPOT'
     });
+    const feeEffective = Math.floor(Date.now() / 1000) - 60;
+    await repo.upsertFeeSchedule({
+      exchangeCode: 'binance',
+      symbol: 'BTCUSDT',
+      productType: 'SPOT',
+      makerBps: 8,
+      takerBps: 12,
+      effectiveFrom: feeEffective,
+      source: 'test'
+    });
+    await repo.upsertFeeSchedule({
+      exchangeCode: 'hyperliquid',
+      symbol: '*',
+      productType: 'SPOT',
+      makerBps: 9,
+      takerBps: 13,
+      effectiveFrom: feeEffective,
+      source: 'test'
+    });
     marketStore.close();
 
     const binanceTicks = new ReplaySubject<MarketTick>(1);
@@ -162,11 +183,16 @@ maybeDescribe('runtime end-to-end integration', () => {
           stream: hyperTicks.asObservable(),
           adapter: { id: 'hyperliquid-mock', feed$: hyperTicks.asObservable(), connect() {}, disconnect() {} }
         }
-      ]
+      ],
+      stop: () => {
+        binanceTicks.complete();
+        hyperTicks.complete();
+      }
     };
     debugLog('feedManager sources', feedManagerResult.sources.map((s) => s.id));
 
     const fillsSubject = new Subject<Fill>();
+    const strategySignal$ = new Subject<StrategySignal>();
     const eventStore = new InMemoryEventStore();
     const manualClock = createManualClock(10_000);
 
@@ -212,7 +238,8 @@ maybeDescribe('runtime end-to-end integration', () => {
         },
         shutdown: () => {}
       }),
-      startApiServer: async () => async () => {}
+      startApiServer: async () => async () => {},
+      createStrategy$: () => strategySignal$.asObservable()
     };
 
     const previousThrottle = process.env.PERSIST_THROTTLE_MS;
@@ -257,16 +284,26 @@ maybeDescribe('runtime end-to-end integration', () => {
     emit(binanceTicks, { t: baseTime, symbol: 'BTCUSDT', bid: 100, ask: 100.2, last: 100.1 });
     emit(hyperTicks, { t: baseTime + 5, symbol: 'BTC', bid: 99.7, ask: 99.9, last: 99.8 });
     emit(hyperTicks, { t: baseTime + 10, symbol: 'BTC', bid: 101.6, ask: 101.8, last: 101.7 });
-    const order = (await orderEventPromise).data as OrderNew;
     manualClock.advance(1);
+    strategySignal$.next({ symbol: 'BTCUSDT', action: 'BUY', px: 101.7, t: manualClock.now() });
+    strategySignal$.complete();
+    const order = (await orderEventPromise).data as OrderNew;
+    expect(order.meta?.expectedFeeBps).toBe(8);
+    expect(order.meta?.feeSource).toBe('test');
+    manualClock.advance(1);
+    const fillPx = order.px ?? 101.7;
+    const fillQty = order.qty ?? 1;
+    const feeBps = order.meta?.expectedFeeBps ?? 0;
+    const feeAmount = Math.abs((fillPx * fillQty * feeBps) / 10_000);
     const fill: Fill = {
       id: randomUUID(),
       orderId: order.id,
       t: manualClock.now(),
       symbol: order.symbol,
-      px: order.px ?? 101.7,
-      qty: order.qty ?? 1,
-      side: order.side
+      px: fillPx,
+      qty: fillQty,
+      side: order.side,
+      fee: feeAmount
     };
     fillsSubject.next(fill);
     await eventStore.append({
@@ -281,8 +318,14 @@ maybeDescribe('runtime end-to-end integration', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const events = await eventStore.read();
-    expect(events.some((evt) => evt.type === 'portfolio.snapshot')).toBe(true);
-    expect(events.some((evt) => evt.type === 'pnl.analytics')).toBe(true);
+    const snapshotEvent = events.find((evt) => evt.type === 'portfolio.snapshot');
+    expect(snapshotEvent).toBeDefined();
+    const snapshot = snapshotEvent?.data as PortfolioSnapshot;
+    expect(snapshot.feesPaid).toBeGreaterThan(0);
+    const pnlEvent = events.find((evt) => evt.type === 'pnl.analytics');
+    expect(pnlEvent).toBeDefined();
+    const pnl = pnlEvent?.data as PortfolioAnalytics;
+    expect(pnl.feesPaid).toBe(snapshot.feesPaid);
 
     const router = await createControlPlaneRouter(loadConfig(configOverrides), { store: eventStore });
     const positionsRes = await router(new Request('http://local/positions'));
@@ -294,6 +337,7 @@ maybeDescribe('runtime end-to-end integration', () => {
     expect(pnlRes.status).toBe(200);
     const pnlJson = await pnlRes.json();
     expect(pnlJson?.nav).toBeDefined();
+    expect(pnlJson?.feesPaid).toBeCloseTo(feeAmount, 10);
 
     handle.stop();
     process.env.PERSIST_THROTTLE_MS = previousThrottle;
@@ -365,6 +409,15 @@ maybeDescribe('runtime end-to-end integration', () => {
         assetClass: 'CRYPTO',
         contractType: 'SPOT'
       });
+      await repo.upsertFeeSchedule({
+        exchangeCode: 'binance',
+        symbol: 'BTCUSDT',
+        productType: 'SPOT',
+        makerBps: 7,
+        takerBps: 11,
+        effectiveFrom: Math.floor(Date.now() / 1000) - 60,
+        source: 'test'
+      });
       marketStore.close();
 
       const marks$ = new ReplaySubject<MarketTick>(1);
@@ -376,7 +429,8 @@ maybeDescribe('runtime end-to-end integration', () => {
             stream: marks$.asObservable(),
             adapter: { id: 'binance-mock', feed$: marks$.asObservable(), connect() {}, disconnect() {} }
           }
-        ]
+        ],
+        stop: () => marks$.complete()
       };
 
       const fillsSubject = new Subject<Fill>();

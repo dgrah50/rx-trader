@@ -98,6 +98,31 @@ const syncMarketStructures = async (exchanges: string[], sqlitePath: string, dry
       const snapshot = await fetcher();
       await syncMarketStructure({ repository: repo, snapshot });
       setupLog(`Synced market structure for ${code}`);
+      if (code === 'binance' || code === 'hyperliquid') {
+        try {
+          const feeCount = await syncFeeSchedules({
+            repo,
+            venue: code as FeeSyncVenue,
+            productType: 'SPOT',
+            timestamp: Date.now(),
+            binance:
+              code === 'binance'
+                ? {
+                    apiKey: process.env.BINANCE_API_KEY,
+                    apiSecret: process.env.BINANCE_API_SECRET
+                  }
+                : undefined,
+            hyperliquid: {}
+          });
+          setupLog(`Synced ${feeCount} fee entries for ${code}`);
+        } catch (error) {
+          setupLog(
+            `Failed to sync fees for ${code}: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
     }
   } finally {
     store.close();
@@ -236,6 +261,7 @@ export const buildProgram = (): Command => {
     dashboardEnabled: boolean;
     dashboardPort: number;
     openDashboard: boolean;
+    durationSeconds?: number;
   }) => {
     const config = loadConfig();
     const gatewayPort = config.gateway.port;
@@ -289,19 +315,71 @@ export const buildProgram = (): Command => {
       await waitForDashboard();
     };
 
-    const waitForSignal = () =>
-      new Promise<void>((resolve) => {
-        const handleSignal = async () => {
+    const createSignalAwaiter = () => {
+      let resolved = false;
+      let resolveFn: (() => void) | null = null;
+      let handler: (() => Promise<void>) | null = null;
+      const promise = new Promise<void>((resolve) => {
+        resolveFn = resolve;
+        handler = async () => {
+          if (resolved) return;
+          resolved = true;
           await shutdown();
-          process.off('SIGINT', handleSignal);
-          process.off('SIGTERM', handleSignal);
+          if (handler) {
+            process.off('SIGINT', handler);
+            process.off('SIGTERM', handler);
+          }
           resolve();
         };
-        process.once('SIGINT', handleSignal);
-        process.once('SIGTERM', handleSignal);
+        process.once('SIGINT', handler);
+        process.once('SIGTERM', handler);
       });
+      const cleanup = () => {
+        if (resolved) return;
+        resolved = true;
+        if (handler) {
+          process.off('SIGINT', handler);
+          process.off('SIGTERM', handler);
+        }
+        resolveFn?.();
+      };
+      return { promise, cleanup };
+    };
 
-    await waitForSignal();
+    const signalAwaiter = createSignalAwaiter();
+    const waiters: Promise<void>[] = [signalAwaiter.promise];
+
+    if (options.durationSeconds && options.durationSeconds > 0) {
+      console.log(`[env:demo] Auto-shutdown in ${options.durationSeconds}s`);
+      const durationSeconds = options.durationSeconds;
+      waiters.push(
+        new Promise<void>((resolve) => {
+          setTimeout(async () => {
+            console.log(
+              `[env:demo] Duration ${durationSeconds}s reached, shutting down...`,
+            );
+            await shutdown();
+            resolve();
+          }, durationSeconds * 1000);
+        }),
+      );
+    }
+
+    await Promise.race(waiters);
+    signalAwaiter.cleanup();
+
+    if (process.env.RX_DEBUG_SHUTDOWN === '1') {
+      try {
+        const handles = (process as any)._getActiveHandles?.() ?? [];
+        console.log('[env:demo] active handles after shutdown:', handles.length);
+        handles.forEach((handle: any, idx: number) => {
+          const type = handle?.constructor?.name ?? typeof handle;
+          console.log(`  [${idx}] ${type}`);
+        });
+      } catch (error) {
+        console.warn('Failed to introspect active handles', error);
+      }
+    }
   };
 
   type EventStoreDriver = 'memory' | 'postgres' | 'sqlite';
@@ -952,6 +1030,7 @@ export const buildProgram = (): Command => {
     .option('--no-dashboard', 'Disable dashboard launch')
     .option('--dashboard-port <port>', 'Dashboard dev server port', '5173')
     .option('--open-dashboard', 'Automatically open the dashboard URL in your browser')
+    .option('--duration <seconds>', 'Stop the demo environment after N seconds (test helper)')
     .action(async (opts) => {
       const driver = normalizeDriver(opts.driver, 'sqlite');
       ensurePersistenceEnv(driver, opts.sqlite, { force: true });
@@ -1049,12 +1128,21 @@ export const buildProgram = (): Command => {
       const dashboardPort = Number(opts.dashboardPort ?? process.env.RX_DASHBOARD_PORT ?? 5173);
       const openDashboard = Boolean(opts.openDashboard ?? process.env.RX_OPEN_DASHBOARD === '1');
 
+      const durationSeconds =
+        typeof opts.duration === 'string' && opts.duration.length
+          ? Number(opts.duration)
+          : undefined;
+
       await runTraderProcess({
         live: opts.live,
         dashboardEnabled,
         dashboardPort,
         openDashboard: openDashboard && dashboardEnabled,
+        durationSeconds: Number.isFinite(durationSeconds) && durationSeconds! > 0 ? durationSeconds : undefined
       });
+      if (process.env.RX_DEBUG_SHUTDOWN === '1') {
+        console.log('[env:demo] runTraderProcess resolved');
+      }
     });
 
   return program;

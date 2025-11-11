@@ -50,7 +50,8 @@ export const wireFillAccounting = (options: FillAccountingOptions): (() => void)
           metadata: {
             fillId: fill.id,
             orderId: fill.orderId,
-            direction
+            direction,
+            fee
           }
         },
         { force: true }
@@ -63,12 +64,14 @@ export const wireFillAccounting = (options: FillAccountingOptions): (() => void)
       });
     };
 
+    const fee = Number.isFinite(fill.fee) ? Math.abs(fill.fee!) : 0;
+
     if (fill.side === 'BUY') {
       emit(baseAsset, fill.qty, 'BASE_CREDIT');
-      emit(quoteAsset, -fill.qty * px, 'QUOTE_DEBIT');
+      emit(quoteAsset, -(fill.qty * px) - fee, 'QUOTE_DEBIT');
     } else {
       emit(baseAsset, -fill.qty, 'BASE_DEBIT');
-      emit(quoteAsset, fill.qty * px, 'QUOTE_CREDIT');
+      emit(quoteAsset, fill.qty * px - fee, 'QUOTE_CREDIT');
     }
   });
 

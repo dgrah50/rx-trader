@@ -201,9 +201,10 @@ Give every strategy an `exit` block to describe when positions should be flatten
 Exit intents merge back into the same risk/execution pipeline as normal intents, so throttle/price-band/notional guards still apply. Telemetry now tracks exit counts per reason (`EXIT_TP`, `EXIT_TIME`, etc.) and surfaces them via `/status` and the dashboard strategy cards.
 
 ### Venue fee sync
+- `rx market:sync --exchanges binance,hyperliquid` now brings down both market metadata *and* the current fee schedule for each venue (under the hood it calls `rx fees:sync` so you get a single “make me trading-ready” command).
 - `rx fees:sync --venue binance --product SPOT` pulls the latest maker/taker bps from Binance (requires API key/secret) and stores them in `market-structure.sqlite`.
 - `rx fees:sync --venue hyperliquid --product PERP` captures Hyperliquid fees (uses public metadata).  
-At runtime the execution policy automatically uses the stored fees per venue/symbol and falls back to the `INTENT_*` defaults when no entry exists.
+At runtime the execution policy automatically uses the stored fees per venue/symbol and only falls back to the `INTENT_*` defaults when no entry exists (with a warning in the logs).
 - Pre-trade risk budgets/account guards now incorporate those maker/taker fees (and reference prices from intent metadata) before approving orders, execution adapters annotate fills with the computed fee + liquidity, and the dashboard Strategy cards display the active tier/source so operators can confirm which schedule is live.
 
 --

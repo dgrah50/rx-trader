@@ -14,8 +14,9 @@ interface PortfolioOverviewProps {
   nav: number | null | undefined;
   realized: number | null | undefined;
   unrealized: number | null | undefined;
+  feesPaid: number | null | undefined;
   positions: Array<[string, PositionSnapshot]>;
-  balances: Array<BalanceEntry & { venue: string }>; 
+  balances: Array<BalanceEntry & { venue: string }>;
   formatNumber: (value: number | null | undefined, precision?: number) => string;
 }
 
@@ -23,9 +24,10 @@ export const PortfolioOverviewCard = ({
   nav,
   realized,
   unrealized,
+  feesPaid,
   positions,
   balances,
-  formatNumber
+  formatNumber,
 }: PortfolioOverviewProps) => {
   const exposureTotals = positions.reduce(
     (acc, [, snap]) => {
@@ -35,7 +37,7 @@ export const PortfolioOverviewCard = ({
       acc.pnl += snap.pnl ?? 0;
       return acc;
     },
-    { gross: 0, net: 0, pnl: 0 }
+    { gross: 0, net: 0, pnl: 0 },
   );
 
   const stableBalance = balances.find((entry) => /USD/i.test(entry.asset)) ?? balances[0];
@@ -50,18 +52,39 @@ export const PortfolioOverviewCard = ({
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Metric label="Net Asset Value" value={`$${formatNumber(nav ?? 0)}`} />
-          <Metric label="Unrealized PnL" value={`$${formatNumber(unrealized ?? 0)}`} intent={(unrealized ?? 0) >= 0 ? 'ok' : 'warn'} />
-          <Metric label="Gross Exposure" value={`$${formatNumber(exposureTotals.gross)}`} />
-          <Metric label="Net Exposure" value={`$${formatNumber(exposureTotals.net)}`} intent={Math.abs(exposureTotals.net) > 0 ? 'info' : undefined} />
+          <Metric
+            label="Unrealized PnL"
+            value={`$${formatNumber(unrealized ?? 0)}`}
+            intent={(unrealized ?? 0) >= 0 ? 'ok' : 'warn'}
+          />
+          <Metric
+            label="Realized PnL"
+            value={`$${formatNumber(realized ?? 0)}`}
+            intent={(realized ?? 0) >= 0 ? 'ok' : 'warn'}
+          />
+          <Metric
+            label="Fees Paid"
+            value={`$${formatNumber(feesPaid ?? 0)}`}
+            intent={feesPaid && feesPaid > 0 ? 'warn' : undefined}
+          />
         </div>
         <Separator className="bg-border/60" />
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-4">
           <Metric label="Cash (all venues)" value={`$${formatNumber(totalCash)}`} />
           <Metric
-            label={stableBalance ? `${stableBalance.asset} @ ${stableBalance.venue}` : 'Primary balance'}
-            value={stableBalance ? formatNumber(stableBalance.available + stableBalance.locked) : '—'}
+            label={
+              stableBalance ? `${stableBalance.asset} @ ${stableBalance.venue}` : 'Primary balance'
+            }
+            value={
+              stableBalance ? formatNumber(stableBalance.available + stableBalance.locked) : '—'
+            }
           />
-          <Metric label="Realized PnL" value={`$${formatNumber(realized ?? 0)}`} intent={(realized ?? 0) >= 0 ? 'ok' : 'warn'} />
+          <Metric label="Gross Exposure" value={`$${formatNumber(exposureTotals.gross)}`} />
+          <Metric
+            label="Net Exposure"
+            value={`$${formatNumber(exposureTotals.net)}`}
+            intent={Math.abs(exposureTotals.net) > 0 ? 'info' : undefined}
+          />
         </div>
       </CardContent>
     </Card>
@@ -71,7 +94,7 @@ export const PortfolioOverviewCard = ({
 const Metric = ({
   label,
   value,
-  intent
+  intent,
 }: {
   label: string;
   value: string;
@@ -83,7 +106,7 @@ const Metric = ({
       className={cn(
         'text-lg font-semibold text-foreground',
         intent === 'ok' && 'text-emerald-400',
-        intent === 'warn' && 'text-rose-400'
+        intent === 'warn' && 'text-rose-400',
       )}
     >
       {value}

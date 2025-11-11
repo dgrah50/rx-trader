@@ -14,6 +14,7 @@ interface PersistenceManagerOptions {
   metrics?: Metrics;
   queueHighWatermarkRatio?: number;
   queueSampleIntervalMs?: number;
+  workerShutdownTimeoutMs?: number;
 }
 
 interface PersistenceManager {
@@ -43,7 +44,13 @@ export const createPersistenceManager = (options: PersistenceManagerOptions): Pe
     options.logger?.error?.({ error }, 'Persistence worker error');
   });
 
+  let forceTerminateTimer: ReturnType<typeof setTimeout> | null = null;
+
   worker.on('exit', (code) => {
+    if (forceTerminateTimer) {
+      clearTimeout(forceTerminateTimer);
+      forceTerminateTimer = null;
+    }
     if (code !== 0) {
       options.logger?.error?.({ code }, 'Persistence worker exited unexpectedly');
     } else {
@@ -96,14 +103,21 @@ export const createPersistenceManager = (options: PersistenceManagerOptions): Pe
   };
 
   const shutdown = () => {
+    if (sampleInterval) {
+      clearInterval(sampleInterval);
+    }
     try {
       worker.postMessage({ type: 'shutdown' });
     } catch (error) {
       options.logger?.error?.({ error }, 'Failed to signal persistence worker shutdown');
     }
-    if (sampleInterval) {
-      clearInterval(sampleInterval);
-    }
+    const timeoutMs = options.workerShutdownTimeoutMs ?? 2_000;
+    forceTerminateTimer = setTimeout(() => {
+      forceTerminateTimer = null;
+      worker
+        .terminate()
+        .catch((error) => options.logger?.error?.({ error }, 'Failed to terminate persistence worker'));
+    }, timeoutMs);
   };
 
   return { enqueue, shutdown };

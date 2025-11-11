@@ -4,10 +4,14 @@ import type { PortfolioAnalytics, PortfolioSnapshot } from '@rx-trader/core/doma
 
 interface AnalyticsState {
   peakNav: number;
+  feesPaid: number;
+  analytics?: PortfolioAnalytics;
 }
 
 const initialState: AnalyticsState = {
-  peakNav: 0
+  peakNav: 0,
+  feesPaid: 0,
+  analytics: undefined
 };
 
 export const portfolioAnalytics$ = (
@@ -18,6 +22,7 @@ export const portfolioAnalytics$ = (
       (state, snapshot) => {
         const peakNav = Math.max(state.peakNav, snapshot.nav);
         const drawdown = snapshot.nav - peakNav;
+        const feesPaid = snapshot.feesPaid ?? state.feesPaid;
         const symbols = Object.fromEntries(
           Object.entries(snapshot.positions).map(([symbol, position]) => [
             symbol,
@@ -34,6 +39,7 @@ export const portfolioAnalytics$ = (
         );
         return {
           peakNav,
+          feesPaid,
           analytics: {
             t: snapshot.t,
             nav: snapshot.nav,
@@ -44,11 +50,12 @@ export const portfolioAnalytics$ = (
             peakNav,
             drawdown,
             drawdownPct: peakNav === 0 ? 0 : drawdown / peakNav,
+            feesPaid,
             symbols
           } satisfies PortfolioAnalytics
         };
       },
-      { ...initialState, analytics: undefined as PortfolioAnalytics | undefined }
+      initialState
     ),
     map((state) => state.analytics!),
     shareReplay({ bufferSize: 1, refCount: true })

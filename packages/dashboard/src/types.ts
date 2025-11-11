@@ -59,6 +59,7 @@ export interface PnlResponse {
   nav: number;
   realized: number;
   unrealized: number;
+  feesPaid: number;
 }
 
 export interface PositionsResponse {
@@ -169,6 +170,7 @@ export interface StatusResponse {
     nav: number | null;
     realized: number | null;
     unrealized: number | null;
+    feesPaid: number | null;
     eventSubscribers: number;
     logSubscribers: number;
     lastEventTs: number | null;

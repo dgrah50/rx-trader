@@ -95,6 +95,7 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
   }, 0);
 
   const nav = cash + realized + unrealized;
+  const feesPaid = fills.reduce((sum, fill) => sum + (fill.fee ?? 0), 0);
 
   return {
     t: Date.now(),
@@ -103,7 +104,8 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
     pnl: realized + unrealized,
     realized,
     unrealized,
-    cash
+    cash,
+    feesPaid
   };
 };
 
@@ -130,6 +132,7 @@ const main = async () => {
     peakNav: snapshot.nav,
     drawdown: 0,
     drawdownPct: 0,
+    feesPaid: snapshot.feesPaid,
     symbols: Object.fromEntries(
       Object.entries(snapshot.positions).map(([symbol, position]) => [
         symbol,

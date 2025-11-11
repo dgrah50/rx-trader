@@ -116,6 +116,7 @@ export const App = () => {
   const statusNav = statusData?.metrics.nav ?? pnl?.nav;
   const statusRealized = statusData?.metrics.realized ?? pnl?.realized;
   const statusUnrealized = statusData?.metrics.unrealized ?? pnl?.unrealized;
+  const statusFees = statusData?.metrics.feesPaid ?? pnl?.feesPaid;
 
   const [gatewayUrl, setGatewayUrl] = useState(
     () => import.meta.env.VITE_GATEWAY_URL ?? window.location.origin,
@@ -161,6 +162,7 @@ export const App = () => {
             nav={statusNav}
             realized={statusRealized}
             unrealized={statusUnrealized}
+            feesPaid={statusFees}
             positions={positionEntries}
             balances={balanceRows}
             formatNumber={formatNumber}

@@ -23,6 +23,7 @@ interface FeedManagerOptions {
 export interface FeedManagerResult {
   marks$: Observable<MarketTick>;
   sources: FeedSource[];
+  stop: () => void;
 }
 
 const deriveHyperliquidCoin = (symbol: string) => {
@@ -101,8 +102,19 @@ export const createFeedManager = (options: FeedManagerOptions): FeedManagerResul
     throw new Error('No feeds configured');
   }
 
+  const debug = process.env.DEBUG_FEEDS === '1';
+  const stop = () => {
+    adapters.forEach((adapter) => adapter.disconnect?.());
+    if (debug) {
+      console.log('[feedManager] adapters disconnected');
+    }
+    trackerEntries.forEach(({ tracker }) => tracker.dispose?.());
+    trackerEntries.clear();
+  };
+
   return {
     marks$: sources[0]!.stream,
-    sources
+    sources,
+    stop
   };
 };

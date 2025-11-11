@@ -31,6 +31,7 @@ const emptyAnalytics: PortfolioAnalytics = {
   peakNav: 1000,
   drawdown: 0,
   drawdownPct: 0,
+  feesPaid: 0,
   symbols: {}
 };
 

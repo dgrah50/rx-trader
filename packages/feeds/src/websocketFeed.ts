@@ -56,6 +56,7 @@ export abstract class WebSocketFeed implements FeedAdapter {
   private reconnectAttempts = 0;
   private readonly clock: Clock;
   private lifecycle?: FeedLifecycleHooks;
+  private shouldReconnect = true;
 
   protected constructor(
     public readonly id: string,
@@ -71,6 +72,7 @@ export abstract class WebSocketFeed implements FeedAdapter {
   }
 
   connect() {
+    this.shouldReconnect = true;
     if (this.socket || this.isConnecting) {
       return;
     }
@@ -78,11 +80,9 @@ export abstract class WebSocketFeed implements FeedAdapter {
   }
 
   disconnect() {
+    this.shouldReconnect = false;
     this.clearReconnectTimer();
-    if (this.socket) {
-      this.socket.close();
-      this.socket = undefined;
-    }
+    this.cleanupSocket(false);
   }
 
   protected abstract createUrl(): string;
@@ -139,6 +139,9 @@ export abstract class WebSocketFeed implements FeedAdapter {
 
   private scheduleReconnect() {
     this.cleanupSocket();
+    if (!this.shouldReconnect) {
+      return;
+    }
     if (this.reconnectTimer) {
       return;
     }
@@ -169,13 +172,15 @@ export abstract class WebSocketFeed implements FeedAdapter {
     return Math.random() * (maxDelay - min) + min;
   }
 
-  private cleanupSocket() {
+  private cleanupSocket(notify = true) {
     this.isConnecting = false;
     if (this.socket) {
       this.socket.close();
       this.socket = undefined;
     }
-    this.lifecycle?.onStatusChange?.('disconnected');
+    if (notify) {
+      this.lifecycle?.onStatusChange?.('disconnected');
+    }
   }
 
   private clearReconnectTimer() {

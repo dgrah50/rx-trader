@@ -26,7 +26,8 @@ describe('wireFillAccounting', () => {
       symbol: 'BTCUSDT',
       px: 50_000,
       qty: 0.1,
-      side: 'BUY'
+      side: 'BUY',
+      fee: 5
     });
 
     fills$.next({
@@ -36,12 +37,13 @@ describe('wireFillAccounting', () => {
       symbol: 'BTCUSDT',
       px: 55_000,
       qty: 0.05,
-      side: 'SELL'
+      side: 'SELL',
+      fee: 2.75
     });
 
     expect(events).toHaveLength(4);
     const deltas = events.map((event) => (event.data as any).delta);
-    expect(deltas).toEqual([0.1, -5000, -0.05, 2750]);
+    expect(deltas).toEqual([0.1, -5005, -0.05, 2747.25]);
     const reasons = events.map((event) => (event.data as any).reason);
     expect(reasons.every((reason) => reason === 'fill')).toBe(true);
     stop();

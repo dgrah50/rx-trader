@@ -139,13 +139,27 @@ const buildStrategyRiskLimits = (
 });
 
 const combineFeedManagers = (feedManagers: FeedManagerResult[]): FeedManagerResult => {
-  if (feedManagers.length === 1) {
-    return feedManagers[0]!;
+  const uniqueManagers = Array.from(new Set(feedManagers));
+  if (uniqueManagers.length === 1) {
+    return uniqueManagers[0]!;
   }
-  const marks$ = merge(...feedManagers.map((manager) => manager.marks$)).pipe(share());
-  const sources = feedManagers.flatMap((manager) => manager.sources);
+  const marks$ = merge(...uniqueManagers.map((manager) => manager.marks$)).pipe(share());
+  const sources = uniqueManagers.flatMap((manager) => manager.sources);
+  const debugFeeds = process.env.DEBUG_FEEDS === '1';
+  const stop = () => {
+    uniqueManagers.forEach((manager) => {
+      try {
+        manager.stop();
+      } catch (error) {
+        if (debugFeeds) {
+          console.warn('Failed to stop feed manager', error);
+        }
+      }
+    });
+  };
   return {
     marks$,
-    sources
+    sources,
+    stop
   } satisfies FeedManagerResult;
 };

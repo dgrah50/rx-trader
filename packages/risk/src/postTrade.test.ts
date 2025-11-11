@@ -11,6 +11,7 @@ const snapshot = (overrides: Partial<PortfolioSnapshot>): PortfolioSnapshot => (
   realized: 0,
   unrealized: 0,
   cash: 0,
+  feesPaid: 0,
   ...overrides
 });
 

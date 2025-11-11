@@ -6,7 +6,7 @@ import {
   FeedType,
   StrategyType,
   parseFeedType,
-  parseStrategyType
+  parseStrategyType,
 } from '@rx-trader/core/constants';
 import { safeParse } from '@rx-trader/core/validation';
 import { exitConfigSchema, type ExitConfig } from './strategy-exits.schema';
@@ -69,8 +69,8 @@ export const envSchema = z.object({
   INTENT_DEFAULT_QTY: z.coerce.number().default(1),
   INTENT_LIMIT_OFFSET_BPS: z.coerce.number().default(0),
   INTENT_MIN_EDGE_BPS: z.coerce.number().default(0),
-  MAKER_FEE_BPS: z.coerce.number().default(0),
-  TAKER_FEE_BPS: z.coerce.number().default(0),
+  MAKER_FEE_BPS: z.coerce.number().default(1),
+  TAKER_FEE_BPS: z.coerce.number().default(1),
   INTENT_TIF: z.enum(['IOC', 'FOK', 'DAY']).default('DAY'),
   INTENT_NOTIONAL_USD: z.coerce.number().default(0),
   INTENT_TAKER_SLIP_BPS: z.coerce.number().default(0),
@@ -102,9 +102,7 @@ export const envSchema = z.object({
   REBALANCER_TARGETS: z.string().default('[]'),
   REBALANCER_INTERVAL_MS: z.coerce.number().default(300_000),
   REBALANCER_AUTO_EXECUTE: booleanEnv.default(false),
-  REBALANCER_EXECUTOR_MODE: z
-    .enum(['manual', 'mock', 'binance', 'hyperliquid'])
-    .default('manual')
+  REBALANCER_EXECUTOR_MODE: z.enum(['manual', 'mock', 'binance', 'hyperliquid']).default('manual'),
 });
 
 export type EnvOverrides = Partial<Record<keyof z.infer<typeof envSchema>, string>>;
@@ -191,7 +189,7 @@ interface LoadedConfigDetails {
 
 const collectInputs = (
   overrides: EnvOverrides,
-  fileResult: JsonOverridesResult
+  fileResult: JsonOverridesResult,
 ): {
   inputs: Record<keyof z.infer<typeof envSchema>, string | undefined>;
   sources: Record<keyof z.infer<typeof envSchema>, ConfigValueMeta>;
@@ -225,7 +223,7 @@ const collectInputs = (
 
   return {
     inputs: inputs as Record<keyof z.infer<typeof envSchema>, string | undefined>,
-    sources: sources as Record<keyof z.infer<typeof envSchema>, ConfigValueMeta>
+    sources: sources as Record<keyof z.infer<typeof envSchema>, ConfigValueMeta>,
   };
 };
 
@@ -233,26 +231,26 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
   app: {
     env: env.NODE_ENV,
     name: env.APP_NAME,
-    version: env.VERSION
+    version: env.VERSION,
   },
   gateway: {
-    port: env.GATEWAY_PORT
+    port: env.GATEWAY_PORT,
   },
   orchestrator: {
-    port: env.ORCHESTRATOR_PORT
+    port: env.ORCHESTRATOR_PORT,
   },
   persistence: {
     pgUrl: env.PG_URL,
     sqlitePath: env.SQLITE_PATH,
     driver: env.EVENT_STORE_DRIVER,
-    queueCapacity: env.PERSIST_QUEUE_CAPACITY
+    queueCapacity: env.PERSIST_QUEUE_CAPACITY,
   },
   marketStructure: {
-    sqlitePath: env.MARKET_STRUCTURE_SQLITE_PATH
+    sqlitePath: env.MARKET_STRUCTURE_SQLITE_PATH,
   },
   observability: {
     otlpUrl: env.OTLP_URL,
-    metricsPort: env.PROMETHEUS_PORT
+    metricsPort: env.PROMETHEUS_PORT,
   },
   execution: {
     account: env.ACCOUNT_ID,
@@ -272,50 +270,50 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
       cooldownMs: env.INTENT_COOLDOWN_MS,
       dedupeWindowMs: env.INTENT_DEDUPE_WINDOW_MS,
       makerTimeoutMs: env.INTENT_MAKER_TIMEOUT_MS,
-      repriceBps: env.INTENT_REPRICE_BPS
+      repriceBps: env.INTENT_REPRICE_BPS,
     },
     reliability: {
       retry: {
         maxAttempts: env.EXEC_RETRY_MAX_ATTEMPTS,
         baseDelayMs: env.EXEC_RETRY_BASE_DELAY_MS,
         maxDelayMs: env.EXEC_RETRY_MAX_DELAY_MS,
-        jitter: env.EXEC_RETRY_JITTER
+        jitter: env.EXEC_RETRY_JITTER,
       },
       circuitBreaker: {
         failureThreshold: env.EXEC_CB_FAILURE_THRESHOLD,
         cooldownMs: env.EXEC_CB_COOLDOWN_MS,
-        halfOpenMaxSuccesses: env.EXEC_CB_HALF_OPEN_MAX_SUCCESSES
+        halfOpenMaxSuccesses: env.EXEC_CB_HALF_OPEN_MAX_SUCCESSES,
       },
       reconciliation: {
         ackTimeoutMs: env.EXEC_RECON_ACK_TIMEOUT_MS,
         fillTimeoutMs: env.EXEC_RECON_FILL_TIMEOUT_MS,
-        pollIntervalMs: env.EXEC_RECON_POLL_INTERVAL_MS
-      }
-    }
+        pollIntervalMs: env.EXEC_RECON_POLL_INTERVAL_MS,
+      },
+    },
   },
   controlPlane: {
     authToken: env.CONTROL_PLANE_TOKEN,
     rateLimit: {
       windowMs: env.CONTROL_PLANE_RATE_WINDOW_MS,
-      max: env.CONTROL_PLANE_RATE_MAX
+      max: env.CONTROL_PLANE_RATE_MAX,
     },
     dashboard: {
-      distDir: env.DASHBOARD_DIST_DIR
-    }
+      distDir: env.DASHBOARD_DIST_DIR,
+    },
   },
   accounting: {
     balanceSyncIntervalMs: env.BALANCE_SYNC_INTERVAL_MS,
     balanceSyncMaxDriftBps: env.BALANCE_SYNC_DRIFT_BPS,
     balanceSyncMutatesLedger: env.BALANCE_SYNC_MUTATES_LEDGER,
-    seedDemoBalance: env.ACCOUNTING_DEMO_BALANCE
+    seedDemoBalance: env.ACCOUNTING_DEMO_BALANCE,
   },
   rebalancer: {
     intervalMs: env.REBALANCER_INTERVAL_MS,
     targets: parseRebalanceTargets(env.REBALANCER_TARGETS),
     executor: {
       auto: env.REBALANCER_AUTO_EXECUTE,
-      mode: env.REBALANCER_EXECUTOR_MODE
-    }
+      mode: env.REBALANCER_EXECUTOR_MODE,
+    },
   } satisfies RebalancerConfig,
   venues: {
     binance:
@@ -323,7 +321,7 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
         ? {
             apiKey: env.BINANCE_API_KEY,
             apiSecret: env.BINANCE_API_SECRET,
-            baseUrl: env.BINANCE_API_BASE
+            baseUrl: env.BINANCE_API_BASE,
           }
         : undefined,
     hyperliquid:
@@ -333,26 +331,26 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
             apiSecret: env.HYPERLIQUID_API_SECRET,
             baseUrl: env.HYPERLIQUID_API_BASE,
             walletAddress: env.HYPERLIQUID_WALLET_ADDRESS,
-            subaccount: env.HYPERLIQUID_SUBACCOUNT
+            subaccount: env.HYPERLIQUID_SUBACCOUNT,
           }
         : env.HYPERLIQUID_WALLET_ADDRESS
-        ? {
-            apiKey: undefined,
-            apiSecret: undefined,
-            baseUrl: env.HYPERLIQUID_API_BASE,
-            walletAddress: env.HYPERLIQUID_WALLET_ADDRESS,
-            subaccount: env.HYPERLIQUID_SUBACCOUNT
-          }
-        : undefined
+          ? {
+              apiKey: undefined,
+              apiSecret: undefined,
+              baseUrl: env.HYPERLIQUID_API_BASE,
+              walletAddress: env.HYPERLIQUID_WALLET_ADDRESS,
+              subaccount: env.HYPERLIQUID_SUBACCOUNT,
+            }
+          : undefined,
   },
   margin: {
     spot: {
       enabled: env.SPOT_MARGIN_ENABLED,
-      leverageCap: env.SPOT_MARGIN_LEVERAGE
-    }
+      leverageCap: env.SPOT_MARGIN_LEVERAGE,
+    },
   },
   strategies: buildStrategiesConfig(env),
-  risk: buildRiskConfig(env)
+  risk: buildRiskConfig(env),
 });
 
 const parseJson = (value: string, label: string): Record<string, unknown> => {
@@ -381,8 +379,8 @@ const buildStrategyConfig = (env: z.infer<typeof envSchema>) => {
     tradeSymbol: env.STRATEGY_TRADE_SYMBOL.toUpperCase(),
     primaryFeed,
     extraFeeds,
-    params
-} satisfies StrategyConfig;
+    params,
+  } satisfies StrategyConfig;
 };
 
 const buildStrategiesConfig = (env: z.infer<typeof envSchema>) => {
@@ -398,12 +396,12 @@ const buildRiskConfig = (env: z.infer<typeof envSchema>) => {
     notional: env.RISK_NOTIONAL_LIMIT,
     maxPosition: env.RISK_MAX_POSITION,
     priceBands: {
-      [tradeSymbol]: { min: env.RISK_PRICE_BAND_MIN, max: env.RISK_PRICE_BAND_MAX }
+      [tradeSymbol]: { min: env.RISK_PRICE_BAND_MIN, max: env.RISK_PRICE_BAND_MAX },
     },
     throttle: {
       windowMs: env.RISK_THROTTLE_WINDOW_MS,
-      maxCount: env.RISK_THROTTLE_MAX_COUNT
-    }
+      maxCount: env.RISK_THROTTLE_MAX_COUNT,
+    },
   } satisfies RiskConfig;
 };
 
@@ -438,7 +436,7 @@ const parseRebalanceTargets = (raw: string): RebalanceTarget[] => {
         min: typeof min === 'number' ? min : undefined,
         max: typeof max === 'number' ? max : undefined,
         target: typeof target === 'number' ? target : undefined,
-        priority: typeof priority === 'number' ? priority : undefined
+        priority: typeof priority === 'number' ? priority : undefined,
       } satisfies RebalanceTarget;
     });
   } catch (error) {
@@ -451,7 +449,7 @@ const defaultExitConfig = exitConfigSchema.parse({ enabled: false });
 const parseStrategies = (
   raw: string,
   fallbackStrategy: StrategyConfig,
-  fallbackRisk: RiskConfig
+  fallbackRisk: RiskConfig,
 ): StrategyDefinition[] => {
   if (!raw.trim()) {
     return [createFallbackStrategyDefinition(fallbackStrategy, fallbackRisk)];
@@ -467,7 +465,12 @@ const parseStrategies = (
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
       throw new Error(`STRATEGIES[${index}] must be an object`);
     }
-    return normalizeStrategyDefinition(entry as Record<string, unknown>, fallbackStrategy, fallbackRisk, index);
+    return normalizeStrategyDefinition(
+      entry as Record<string, unknown>,
+      fallbackStrategy,
+      fallbackRisk,
+      index,
+    );
   });
 
   for (const def of definitions) {
@@ -484,19 +487,22 @@ const normalizeStrategyDefinition = (
   entry: Record<string, unknown>,
   fallbackStrategy: StrategyConfig,
   fallbackRisk: RiskConfig,
-  index: number
+  index: number,
 ): StrategyDefinition => {
   const id = typeof entry.id === 'string' && entry.id.trim().length ? entry.id.trim() : undefined;
   if (!id) {
     throw new Error(`STRATEGIES[${index}].id is required`);
   }
 
-  const type = typeof entry.type === 'string' ? parseStrategyType(entry.type) : fallbackStrategy.type;
-  const tradeSymbolRaw = typeof entry.tradeSymbol === 'string' ? entry.tradeSymbol : fallbackStrategy.tradeSymbol;
+  const type =
+    typeof entry.type === 'string' ? parseStrategyType(entry.type) : fallbackStrategy.type;
+  const tradeSymbolRaw =
+    typeof entry.tradeSymbol === 'string' ? entry.tradeSymbol : fallbackStrategy.tradeSymbol;
   const tradeSymbol = tradeSymbolRaw.toUpperCase();
-  const primaryFeed = typeof entry.primaryFeed === 'string'
-    ? parseFeedType(entry.primaryFeed)
-    : fallbackStrategy.primaryFeed;
+  const primaryFeed =
+    typeof entry.primaryFeed === 'string'
+      ? parseFeedType(entry.primaryFeed)
+      : fallbackStrategy.primaryFeed;
   const extraFeeds = Array.isArray(entry.extraFeeds)
     ? entry.extraFeeds.map((feed, feedIdx) => {
         if (typeof feed !== 'string') {
@@ -506,9 +512,10 @@ const normalizeStrategyDefinition = (
       })
     : fallbackStrategy.extraFeeds;
 
-  const params = (entry.params && typeof entry.params === 'object' && !Array.isArray(entry.params)
-    ? (entry.params as Record<string, unknown>)
-    : fallbackStrategy.params) ?? {};
+  const params =
+    (entry.params && typeof entry.params === 'object' && !Array.isArray(entry.params)
+      ? (entry.params as Record<string, unknown>)
+      : fallbackStrategy.params) ?? {};
 
   const mode = entry.mode === 'sandbox' ? 'sandbox' : 'live';
   const priority = typeof entry.priority === 'number' ? entry.priority : 0;
@@ -516,7 +523,7 @@ const normalizeStrategyDefinition = (
   const baseBudget = {
     notional: fallbackRisk.notional,
     maxPosition: fallbackRisk.maxPosition,
-    throttle: { ...fallbackRisk.throttle }
+    throttle: { ...fallbackRisk.throttle },
   };
 
   const budget = normalizeBudget(entry.budget, baseBudget);
@@ -532,26 +539,33 @@ const normalizeStrategyDefinition = (
     extraFeeds,
     params,
     budget,
-    exit
+    exit,
   } satisfies StrategyDefinition;
 };
 
 const normalizeBudget = (
   rawBudget: unknown,
-  baseBudget: Required<StrategyBudgetConfig>
+  baseBudget: Required<StrategyBudgetConfig>,
 ): StrategyBudgetConfig => {
   if (!rawBudget || typeof rawBudget !== 'object' || Array.isArray(rawBudget)) {
     return baseBudget;
   }
   const budget = rawBudget as Record<string, unknown>;
   const notional = typeof budget.notional === 'number' ? budget.notional : baseBudget.notional;
-  const maxPosition = typeof budget.maxPosition === 'number' ? budget.maxPosition : baseBudget.maxPosition;
+  const maxPosition =
+    typeof budget.maxPosition === 'number' ? budget.maxPosition : baseBudget.maxPosition;
   let throttle = baseBudget.throttle;
   if (budget.throttle && typeof budget.throttle === 'object' && !Array.isArray(budget.throttle)) {
     const rawThrottle = budget.throttle as Record<string, unknown>;
     throttle = {
-      windowMs: typeof rawThrottle.windowMs === 'number' ? rawThrottle.windowMs : baseBudget.throttle.windowMs,
-      maxCount: typeof rawThrottle.maxCount === 'number' ? rawThrottle.maxCount : baseBudget.throttle.maxCount
+      windowMs:
+        typeof rawThrottle.windowMs === 'number'
+          ? rawThrottle.windowMs
+          : baseBudget.throttle.windowMs,
+      maxCount:
+        typeof rawThrottle.maxCount === 'number'
+          ? rawThrottle.maxCount
+          : baseBudget.throttle.maxCount,
     };
   }
   return { notional, maxPosition, throttle } satisfies StrategyBudgetConfig;
@@ -559,7 +573,7 @@ const normalizeBudget = (
 
 const createFallbackStrategyDefinition = (
   strategy: StrategyConfig,
-  risk: RiskConfig
+  risk: RiskConfig,
 ): StrategyDefinition => ({
   id: 'default',
   mode: 'live',
@@ -572,9 +586,9 @@ const createFallbackStrategyDefinition = (
   budget: {
     notional: risk.notional,
     maxPosition: risk.maxPosition,
-    throttle: { ...risk.throttle }
+    throttle: { ...risk.throttle },
   },
-  exit: defaultExitConfig
+  exit: defaultExitConfig,
 });
 
 const normalizeExit = (raw: unknown, index?: number): ExitConfig => {
@@ -665,7 +679,7 @@ export const loadConfigDetails = (overrides: EnvOverrides = {}): LoadedConfigDet
     env,
     inputs,
     sources,
-    configFilePath: fileResult.filePath
+    configFilePath: fileResult.filePath,
   };
 };
 

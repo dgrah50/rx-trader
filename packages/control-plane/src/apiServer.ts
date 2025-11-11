@@ -35,5 +35,5 @@ export const startApiServer = async (options: ApiServerOptions) => {
     }
   });
   const server = Bun.serve({ port: options.config.gateway.port, fetch: handler, idleTimeout: 120 });
-  return () => server.stop();
+  return () => server.stop(true);
 };

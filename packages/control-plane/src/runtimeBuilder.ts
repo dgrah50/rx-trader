@@ -116,7 +116,12 @@ export const buildRuntime = async (
         { exchange: exchangeCode, symbol, productType, err: (error as Error).message },
         'Fee lookup failed, falling back to defaults'
       );
+      return defaultFees;
     }
+    logger.warn(
+      { exchange: exchangeCode, symbol, productType },
+      'Fee schedule missing in market-structure DB; falling back to execution defaults'
+    );
     return defaultFees;
   };
 
@@ -205,13 +210,15 @@ export const buildRuntime = async (
   );
 
   const executionFactory = deps.createExecutionManager ?? createExecutionManager;
+  const executionFeeDefaults = primaryStrategy.fees ?? defaultFees;
   const execution = executionFactory({
     live,
     config,
     enqueue: persistence.enqueue,
     clock,
     metrics,
-    logger
+    logger,
+    feeDefaults: executionFeeDefaults
   });
 
   return {

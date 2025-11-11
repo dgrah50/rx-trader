@@ -27,6 +27,10 @@ interface ExecutionManagerOptions {
   clock: Clock;
   metrics: Metrics;
   logger: Logger;
+  feeDefaults?: {
+    makerBps: number;
+    takerBps: number;
+  };
 }
 
 interface ExecutionManager {
@@ -83,8 +87,8 @@ export const createExecutionManager = (
   options: ExecutionManagerOptions
 ): ExecutionManager => {
   const feeDefaults = {
-    maker: options.config.execution.policy.makerFeeBps ?? 0,
-    taker: options.config.execution.policy.takerFeeBps ?? 0
+    maker: options.feeDefaults?.makerBps ?? options.config.execution.policy.makerFeeBps ?? 0,
+    taker: options.feeDefaults?.takerBps ?? options.config.execution.policy.takerFeeBps ?? 0
   };
   const pendingFees = new Map<string, PendingFeeMeta>();
 
