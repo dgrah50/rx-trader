@@ -88,6 +88,13 @@ const emptyStrategyMetrics = (): StrategyRuntimeStatus['metrics'] => ({
   lastRejectTs: null
 });
 
+const emptyExitMetrics = (): StrategyRuntimeStatus['exits'] => ({
+  total: 0,
+  byReason: {},
+  lastReason: null,
+  lastTs: null
+});
+
 const normalizeStrategyStatus = (
   definition: AppConfig['strategies'][number],
   fees: { makerBps: number; takerBps: number; source: string },
@@ -104,7 +111,8 @@ const normalizeStrategyStatus = (
   params: definition.params ?? {},
   fees,
   margin: resolveStrategyMarginConfig(definition, config),
-  metrics: emptyStrategyMetrics()
+  metrics: emptyStrategyMetrics(),
+  exits: emptyExitMetrics()
 });
 
 const readBacktestHistory = async (
@@ -371,7 +379,7 @@ const handleCorsPreflight = (request: Request) => {
     const feeds: FeedHealthSnapshot[] = getFeedHealthSnapshots();
     const defaultFeeTier = {
       makerBps: config.execution.policy.makerFeeBps,
-      takerBps: config.execution.policy.takerBps,
+      takerBps: config.execution.policy.takerFeeBps,
       source: 'config'
     };
     const strategySource: StrategyStatusSource =

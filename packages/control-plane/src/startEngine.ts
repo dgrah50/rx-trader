@@ -1,16 +1,25 @@
 import { monitorPostTradeRisk } from '@rx-trader/risk/postTrade';
 import { portfolio$, portfolioAnalytics$ } from '@rx-trader/portfolio';
-import type { Fill, PortfolioAnalytics, BalanceEntry, DomainEvent, OrderNew } from '@rx-trader/core/domain';
+import type {
+  Fill,
+  PortfolioAnalytics,
+  PortfolioSnapshot,
+  BalanceEntry,
+  DomainEvent,
+  OrderNew
+} from '@rx-trader/core/domain';
 import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
 import { startApiServer } from './apiServer';
 import { buildRuntime } from './runtimeBuilder';
 import {
   createIntentReconciler,
   ExecutionCircuitOpenError,
-  createStrategyTelemetry
+  createStrategyTelemetry,
+  createExitEngine,
+  type ExitEngineHandle
 } from '@rx-trader/pipeline';
-import { auditTime, filter, map } from 'rxjs';
-import type { Observable } from 'rxjs';
+import { auditTime, filter, map, distinctUntilChanged } from 'rxjs';
+import type { Observable, Subscription } from 'rxjs';
 import {
   BalanceSyncService,
   BinanceBalanceProvider,
@@ -29,6 +38,7 @@ import type { InstrumentMetadata, FeedManagerResult } from '@rx-trader/pipeline'
 import { RebalanceService, TransferExecutionService, createTransferProviders } from '@rx-trader/portfolio';
 import type { EventStore } from '@rx-trader/event-store';
 import { createAuditLogger } from './auditLogger';
+import { toPricePoints } from '@rx-trader/strategies/utils';
 
 type AccountBalanceAdjusted = ReturnType<typeof accountBalanceAdjustedSchema['parse']>;
 
@@ -43,6 +53,11 @@ export interface StartEngineOptions {
   configOverrides?: EnvOverrides;
   clock?: Clock;
   dependencies?: EngineDependencies;
+  hooks?: {
+    onExitIntent?: (order: OrderNew) => void;
+    onSnapshot?: (snapshot: PortfolioSnapshot) => void;
+    onAnalytics?: (analytics: PortfolioAnalytics) => void;
+  };
 }
 
 export interface EngineHandle {
@@ -68,7 +83,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     instrument,
     strategyRuntimes,
     accountGuard,
-    marginGuard
+    marginGuard,
+    exitIntentSink
   } = await buildRuntime({ ...options, clock }, options.dependencies);
 
   const auditEnabled = Boolean(
@@ -81,6 +97,9 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     path: process.env.AUDIT_LOG_PATH,
     logger
   });
+
+  const exitHandles: ExitEngineHandle[] = [];
+  const exitSubscriptions: Subscription[] = [];
 
 
   const venueId = instrument.venue ?? execution.adapter.id;
@@ -422,6 +441,54 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     clock
   );
   const analytics$ = portfolioAnalytics$(snapshots$);
+  const hookSubscriptions: Subscription[] = [];
+  if (options.hooks?.onSnapshot) {
+    hookSubscriptions.push(snapshots$.subscribe((snapshot) => options.hooks?.onSnapshot?.(snapshot)));
+  }
+  if (options.hooks?.onAnalytics) {
+    hookSubscriptions.push(analytics$.subscribe((analytics) => options.hooks?.onAnalytics?.(analytics)));
+  }
+
+  strategyRuntimes.forEach((runtime) => {
+    const exitConfig = runtime.definition.exit;
+    if (!exitConfig?.enabled) {
+      return;
+    }
+    const symbol = runtime.definition.tradeSymbol;
+    const positionsForSymbol$ = snapshots$.pipe(
+      map((snapshot) => snapshot.positions[symbol] ?? null),
+      distinctUntilChanged(positionsEqual)
+    );
+    const price$ = runtime.feedManager.marks$.pipe(toPricePoints(symbol));
+    const exitHandle = createExitEngine({
+      strategyId: runtime.definition.id,
+      symbol,
+      accountId: config.execution.account,
+      exit: exitConfig,
+      clock,
+      positions$: positionsForSymbol$,
+      price$,
+      signals$: runtime.signals$, 
+      analytics$
+    });
+    if ((process.env.DEBUG_E2E ?? '').toLowerCase() === 'true') {
+      logger.info({ strategyId: runtime.definition.id }, 'Exit engine wired');
+    }
+    exitHandles.push(exitHandle);
+    const sub = exitHandle.exitIntents$.subscribe((order) => {
+      exitIntentSink.next(order);
+      options.hooks?.onExitIntent?.(order);
+      const reason = typeof order.meta?.reason === 'string' ? (order.meta.reason as string) : undefined;
+      strategyTelemetry.recordExit(runtime.definition.id, reason);
+      logAudit('exit-intent', {
+        order,
+        balances: captureBalances(),
+        quoteReserve: describeQuoteReserve(),
+        margin: describeMarginState()
+      });
+    });
+    exitSubscriptions.push(sub);
+  });
 
   monitorPostTradeRisk(snapshots$, { navFloor: -10_000, maxDrawdown: 5_000 }).subscribe(
     (decision) => {
@@ -469,6 +536,9 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   const handleShutdown = () => {
     if (stopped) return;
     stopped = true;
+    exitSubscriptions.forEach((sub) => sub.unsubscribe());
+    exitHandles.forEach((handle) => handle.stop());
+    exitIntentSink.complete();
     persistence.shutdown();
     marketStore.close();
     stopAccounting();
@@ -479,6 +549,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     accountState.stop();
     intentReconciler.stop();
     audit.close();
+    hookSubscriptions.forEach((sub) => sub.unsubscribe());
     if (stopApi) {
       void stopApi();
     }
@@ -532,6 +603,18 @@ const createBalanceProvider = (
     marks$: input.feedManager.marks$,
     fallbackPrice: 100
   });
+};
+
+const positionsEqual = (
+  a: PortfolioSnapshot['positions'][string] | null,
+  b: PortfolioSnapshot['positions'][string] | null
+): boolean => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const posEqual = Math.abs(a.pos - b.pos) < 1e-12;
+  const avgPxEqual = Math.abs(a.avgPx - b.avgPx) < 1e-9;
+  const notionalEqual = Math.abs((a.notional ?? a.px * a.pos) - (b.notional ?? b.px * b.pos)) < 1e-2;
+  return posEqual && avgPxEqual && notionalEqual;
 };
 
 const isBalanceAdjustedEvent = (

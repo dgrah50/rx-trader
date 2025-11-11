@@ -53,6 +53,32 @@ const supportedExchangeFetchers = {
   hyperliquid: fetchHyperliquidMarketStructure,
 } as const;
 
+const feedToVenue = (feed?: FeedType | null) => {
+  if (!feed) return 'paper';
+  switch (feed) {
+    case FeedType.Binance:
+      return 'binance';
+    case FeedType.Hyperliquid:
+      return 'hyperliquid';
+    default:
+      return 'paper';
+  }
+};
+
+const inferAssetsFromSymbol = (symbol: string) => {
+  const upper = (symbol ?? '').toUpperCase();
+  const candidates = ['USDT', 'USD', 'USDC', 'BTC', 'ETH', 'BNB', 'EUR', 'JPY'];
+  for (const candidate of candidates) {
+    if (upper.endsWith(candidate) && upper.length > candidate.length) {
+      return {
+        base: upper.slice(0, -candidate.length),
+        quote: candidate
+      };
+    }
+  }
+  return { base: upper || 'BTC', quote: 'USD' };
+};
+
 const syncMarketStructures = async (exchanges: string[], sqlitePath: string, dryRun: boolean) => {
   if (!exchanges.length) {
     setupLog('No exchanges requested for market:sync');
@@ -86,8 +112,8 @@ const seedDemoEventStore = async (config: AppConfig, dryRun: boolean) => {
   const store = await createEventStore(config);
   const primaryStrategy = config.strategies[0];
   const symbol = primaryStrategy?.tradeSymbol ?? 'BTCUSDT';
-  const venue = primaryStrategy?.venue ?? 'paper';
-  const quoteAsset = primaryStrategy?.quoteAsset ?? 'USDT';
+  const venue = feedToVenue(primaryStrategy?.primaryFeed);
+  const { quote: quoteAsset } = inferAssetsFromSymbol(symbol);
   await store.append({
     id: crypto.randomUUID(),
     type: 'account.balance.adjusted',

@@ -121,4 +121,45 @@ describe('loadConfig', () => {
     expect(second.extraFeeds).toContain('binance');
     expect(second.budget?.notional).toBe(config.risk.notional);
   });
+
+  it('parses per-strategy exit configs with defaults applied', () => {
+    process.env.STRATEGIES = JSON.stringify([
+      {
+        id: 'exit-enabled',
+        type: 'MOMENTUM',
+        tradeSymbol: 'btcusdt',
+        primaryFeed: 'binance',
+        exit: {
+          enabled: true,
+          time: { enabled: true, maxHoldMs: 60000, minHoldMs: 5000 },
+          tpSl: { enabled: true, tpSigma: 2 }
+        }
+      }
+    ]);
+
+    const config = loadConfig();
+    const exit = config.strategies[0]?.exit;
+    expect(exit?.enabled).toBe(true);
+    expect(exit?.time?.maxHoldMs).toBe(60000);
+    expect(exit?.time?.minHoldMs).toBe(5000);
+    expect(exit?.tpSl?.tpSigma).toBe(2);
+    expect(exit?.tpSl?.slSigma).toBe(1); // default applied
+  });
+
+  it('rejects invalid exit configs', () => {
+    process.env.STRATEGIES = JSON.stringify([
+      {
+        id: 'exit-invalid',
+        type: 'MOMENTUM',
+        tradeSymbol: 'btcusdt',
+        primaryFeed: 'binance',
+        exit: {
+          enabled: true,
+          trailing: { enabled: true, retracePct: 1.5 }
+        }
+      }
+    ]);
+
+    expect(() => loadConfig()).toThrow(/STRATEGIES\[0\].exit/i);
+  });
 });

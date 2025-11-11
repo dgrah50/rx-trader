@@ -38,6 +38,7 @@ export interface StrategyRuntime {
   intents$: Observable<OrderNew>;
   fees?: RuntimeStrategyConfig['fees'];
   margin?: StrategyMarginConfig;
+  exit?: RuntimeStrategyConfig['exit'];
 }
 
 export interface StrategyOrchestratorResult {
@@ -77,7 +78,7 @@ export const createStrategyOrchestrator = (
     const feeAwarePolicy = {
       ...options.executionPolicy,
       makerFeeBps: runtimeConfig.fees?.makerBps ?? options.executionPolicy.makerFeeBps,
-      takerFeeBps: runtimeConfig.fees?.takerBps ?? options.executionPolicy.takerBps
+      takerFeeBps: runtimeConfig.fees?.takerBps ?? options.executionPolicy.takerFeeBps
     };
 
     const buildIntents = intentBuilderFactory({
@@ -111,7 +112,8 @@ export const createStrategyOrchestrator = (
       signals$: rawSignals$,
       intents$,
       fees: runtimeConfig.fees,
-      margin: runtimeConfig.margin
+      margin: runtimeConfig.margin,
+      exit: runtimeConfig.exit
     } satisfies StrategyRuntime;
   });
 

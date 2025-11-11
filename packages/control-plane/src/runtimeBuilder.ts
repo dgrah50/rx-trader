@@ -25,6 +25,9 @@ import type {
 import { createQuoteReserveGuard, createMarketExposureGuard } from '@rx-trader/risk';
 import { resolveStrategyMarginConfig } from './marginConfig';
 import type { AccountExposureGuard } from '@rx-trader/risk/preTrade';
+import { merge, Subject } from 'rxjs';
+import { share } from 'rxjs/operators';
+import type { OrderNew } from '@rx-trader/core/domain';
 
 const feedTypeToExchange = (feed: FeedType): string | null => {
   switch (feed) {
@@ -55,6 +58,7 @@ export interface RuntimeBuilderResult {
   strategyRuntimes: StrategyRuntime[];
   accountGuard?: AccountExposureGuard;
   marginGuard?: ReturnType<typeof createMarketExposureGuard>;
+  exitIntentSink: Subject<OrderNew>;
 }
 
 export interface RuntimeDependencies {
@@ -84,7 +88,7 @@ export const buildRuntime = async (
   const marketRepository = new MarketStructureRepository(marketStore.db);
   const defaultFees = {
     makerBps: config.execution.policy.makerFeeBps,
-    takerBps: config.execution.policy.takerBps,
+    takerBps: config.execution.policy.takerFeeBps,
     source: 'default'
   };
 
@@ -174,6 +178,10 @@ export const buildRuntime = async (
     onFeedTick: () => metrics.ticksIngested.inc()
   });
 
+  const exitIntentSink = new Subject<OrderNew>();
+
+  const mergedIntents$ = merge(orchestrator.intents$, exitIntentSink).pipe(share());
+
   const marketGuard = createMarketExposureGuard({
     productType: primaryMargin.productType,
     venue: instrumentVenue,
@@ -184,7 +192,7 @@ export const buildRuntime = async (
   });
 
   const riskStreams = createRiskStreams(
-    orchestrator.intents$,
+    mergedIntents$,
     {
       notional: risk.notional,
       maxPosition: risk.maxPosition,
@@ -227,7 +235,8 @@ export const buildRuntime = async (
     strategies: runtimeStrategies,
     strategyRuntimes: orchestrator.runtimes,
     accountGuard,
-    marginGuard: primaryMargin.mode === 'cash' ? undefined : marketGuard
+    marginGuard: primaryMargin.mode === 'cash' ? undefined : marketGuard,
+    exitIntentSink
   };
 };
 

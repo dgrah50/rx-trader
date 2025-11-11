@@ -1,5 +1,5 @@
 import type { createLogger, createMetrics } from '@rx-trader/observability';
-import type { StrategyDefinition } from '@rx-trader/config';
+import type { StrategyDefinition, ExitConfig } from '@rx-trader/config';
 
 export type LoggerInstance = ReturnType<typeof createLogger>;
 export type MetricsInstance = ReturnType<typeof createMetrics>;
@@ -26,6 +26,7 @@ export interface RuntimeStrategyConfig {
     source?: string;
   };
   margin?: StrategyMarginConfig;
+  exit?: ExitConfig;
 }
 
 export interface StrategyMarginConfig {

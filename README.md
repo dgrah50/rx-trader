@@ -23,6 +23,7 @@ graph LR
   subgraph Pipeline
     FM(Feed Manager)
     STRAT(Strategies)
+    EXIT(Exit Engine)
     INTENT(Intent Builder)
     RISK(Risk Filters)
     EXEC(Execution Manager)
@@ -38,6 +39,7 @@ graph LR
     UI(React Dashboard)
   end
   BF & HF & SF --> FM --> STRAT --> INTENT --> RISK --> EXEC
+  PROJ --> EXIT --> RISK
   EXEC --> API
   INTENT --> QUEUE --> WORKER --> STORE --> PROJ --> API --> UI
 ```
@@ -175,6 +177,28 @@ Any missing budget fields inherit the global `risk_*` limits, and sandboxed stra
 Each strategy publishes telemetry (signals, intents, orders, fills, rejects, last-activity timestamps) that surfaces via `GET /status` (`runtime.strategies[]`) and powers the dashboard Strategy Mixer + CLI/ops tooling.
 
 > ℹ️ **Legacy env knobs:** the `STRATEGY_*` environment variables still exist, but they now only define the fallback entry in `config.strategies` when `STRATEGIES` is empty. Put real configurations in the `STRATEGIES` array (JSON string or `rx.config.json`) so everything—CLI, runtime, dashboard—reads from a single list.
+
+### Strategy exit rules
+Give every strategy an `exit` block to describe when positions should be flattened. The schema supports TP/SL bands (in sigma units), fair-value epsilon checks, time stops, trailing stops, and portfolio overrides (gross/symbol exposure, drawdown, margin buffers). Runtime config validation lives in `exitConfigSchema`, so missing/invalid fields fail fast, and defaults (`tpSigma=1.5`, `slSigma=1`, `epsilonBps=5`, etc.) are injected automatically.
+
+```json
+"exit": {
+  "enabled": true,
+  "tpSl": { "enabled": true, "tpSigma": 1.8, "slSigma": 0.9 },
+  "fairValue": { "enabled": true, "epsilonBps": 6, "closeOnSignalFlip": true },
+  "time": { "enabled": true, "maxHoldMs": 600000, "minHoldMs": 15000 },
+  "trailing": { "enabled": true, "retracePct": 0.05, "initArmPnLs": 0.5 },
+  "riskOverrides": {
+    "maxGrossExposureUsd": 750000,
+    "maxSymbolExposureUsd": 250000,
+    "maxDrawdownPct": 0.04,
+    "marginBufferPct": 0.15,
+    "action": "FLATTEN_ALL"
+  }
+}
+```
+
+Exit intents merge back into the same risk/execution pipeline as normal intents, so throttle/price-band/notional guards still apply. Telemetry now tracks exit counts per reason (`EXIT_TP`, `EXIT_TIME`, etc.) and surfaces them via `/status` and the dashboard strategy cards.
 
 ### Venue fee sync
 - `rx fees:sync --venue binance --product SPOT` pulls the latest maker/taker bps from Binance (requires API key/secret) and stores them in `market-structure.sqlite`.

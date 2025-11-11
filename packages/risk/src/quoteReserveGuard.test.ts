@@ -37,4 +37,17 @@ describe('QuoteReserveGuard', () => {
     guard.release?.('order-2');
     expect(guard.getAvailable('binance', 'USDT')).toBeCloseTo(500);
   });
+
+  it('treats missing balances as zero for the guarded venue', () => {
+    const guard = createQuoteReserveGuard({
+      venue: 'binance',
+      baseAsset: 'BTC',
+      quoteAsset: 'USDT',
+      getBalance: () => undefined
+    });
+
+    expect(guard.getAvailable('binance', 'USDT')).toBe(0);
+    expect(guard.getAvailable('binance', 'BTC')).toBe(0);
+    expect(guard.getAvailable('other', 'USDT')).toBeNull();
+  });
 });

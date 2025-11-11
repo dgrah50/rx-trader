@@ -1,12 +1,13 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-import { Subject, ReplaySubject, filter, firstValueFrom } from 'rxjs';
+import { Subject, ReplaySubject, filter, firstValueFrom, EMPTY } from 'rxjs';
 import type {
   MarketTick,
   OrderNew,
   Fill,
   DomainEvent,
   OrderAck,
-  OrderReject
+  OrderReject,
+  PortfolioSnapshot
 } from '@rx-trader/core/domain';
 import { FeedType } from '@rx-trader/core/constants';
 import { InMemoryEventStore } from '@rx-trader/event-store';
@@ -300,6 +301,224 @@ maybeDescribe('runtime end-to-end integration', () => {
     hyperTicks.complete();
   }
   );
+
+  it(
+    'emits exit intents when time-stop config triggers',
+    { timeout: 20_000 },
+    async () => {
+      const sqlitePath = resolve(tempDir, 'market-structure.sqlite');
+      const randomPort = 42000 + Math.floor(Math.random() * 10000);
+      const strategiesOverride = JSON.stringify([
+        {
+          id: 'exit-demo',
+          type: 'MOMENTUM',
+          tradeSymbol: 'BTCUSDT',
+          primaryFeed: 'BINANCE',
+          params: {},
+          exit: {
+            enabled: true,
+            time: { enabled: true, maxHoldMs: 500 }
+          }
+        }
+      ]);
+      const configOverrides = {
+        SQLITE_PATH: sqlitePath,
+        MARKET_STRUCTURE_SQLITE_PATH: sqlitePath,
+        GATEWAY_PORT: String(randomPort),
+        STRATEGIES: strategiesOverride,
+        ACCOUNT_ID: 'E2E-EXIT',
+        INTENT_MODE: 'market',
+        INTENT_NOTIONAL_USD: '100',
+        INTENT_TIF: 'IOC',
+        EVENT_STORE_DRIVER: 'memory',
+        RISK_MAX_POSITION: '10',
+        RISK_NOTIONAL_LIMIT: '1000000',
+        RISK_PRICE_BAND_MIN: '0',
+        RISK_PRICE_BAND_MAX: '1000000',
+        RISK_THROTTLE_WINDOW_MS: '0',
+        RISK_THROTTLE_MAX_COUNT: '100'
+      } as const;
+
+      const previewConfig = loadConfig(configOverrides);
+      if (debugE2E) {
+        console.log('[runtime.e2e] preview strategies', previewConfig.strategies.map((s) => s.id));
+      }
+      expect(previewConfig.strategies[0]?.exit?.time?.enabled).toBe(true);
+
+      const marketStore = createMarketStructureStore(sqlitePath);
+      const repo = new MarketStructureRepository(marketStore.db);
+      await repo.ensureExchange({ code: 'binance', name: 'Binance' });
+      await repo.upsertPair({
+        symbol: 'BTCUSDT',
+        baseSymbol: 'BTC',
+        quoteSymbol: 'USDT',
+        assetClass: 'CRYPTO',
+        contractType: 'SPOT'
+      });
+      await repo.upsertExchangePair({
+        exchangeCode: 'binance',
+        pairSymbol: 'BTCUSDT',
+        exchSymbol: 'BTCUSDT',
+        tickSize: 0.1,
+        lotSize: 0.001,
+        minLotSize: 0.001,
+        assetClass: 'CRYPTO',
+        contractType: 'SPOT'
+      });
+      marketStore.close();
+
+      const marks$ = new ReplaySubject<MarketTick>(1);
+      const feedManagerResult = {
+        marks$: marks$.asObservable(),
+        sources: [
+          {
+            id: 'binance-mock',
+            stream: marks$.asObservable(),
+            adapter: { id: 'binance-mock', feed$: marks$.asObservable(), connect() {}, disconnect() {} }
+          }
+        ]
+      };
+
+      const fillsSubject = new Subject<Fill>();
+      const eventStore = new InMemoryEventStore();
+      const manualClock = createManualClock(0);
+      const ackSubject = new Subject<OrderAck>();
+      const rejectSubject = new Subject<OrderReject>();
+      const execEvents = new Subject<DomainEvent>();
+      const exitIntentSubject = new Subject<OrderNew>();
+      const snapshotLog: PortfolioSnapshot[] = [];
+
+      const dependencies: EngineDependencies = {
+        createFeedManager: () => feedManagerResult as any,
+        createStrategy$: () => EMPTY,
+        createExecutionManager: ({ enqueue }) => {
+          const adapterId = 'paper-exit';
+          const adapter = {
+            id: adapterId,
+            submit: async (order: OrderNew) => {
+              const ack: OrderAck = { id: order.id, t: manualClock.now(), venue: adapterId };
+              ackSubject.next(ack);
+              const ackEvent: DomainEvent = {
+                id: randomUUID(),
+                type: 'order.ack',
+                data: ack,
+                ts: ack.t
+              };
+              execEvents.next(ackEvent);
+              enqueue(ackEvent);
+            },
+            cancel: async () => {}
+          };
+          return {
+            adapter,
+            events$: execEvents.asObservable(),
+            fills$: fillsSubject.asObservable(),
+            acks$: ackSubject.asObservable(),
+            rejects$: rejectSubject.asObservable(),
+            submit: adapter.submit
+          } as any;
+        },
+        createBalanceProvider: ({ instrument }) => mockBalanceProvider(instrument),
+        createEventStore: async () => eventStore,
+        createPersistenceManager: () => ({
+          enqueue: (event: DomainEvent) => {
+            void eventStore.append(event);
+          },
+          shutdown: () => {}
+        }),
+        startApiServer: async () => async () => {}
+      };
+
+      const previousThrottle = process.env.PERSIST_THROTTLE_MS;
+      process.env.PERSIST_THROTTLE_MS = '0';
+      const { startEngine } = await import('./startEngine');
+      const handle = await startEngine({
+        live: false,
+        registerSignalHandlers: false,
+        clock: manualClock,
+        configOverrides,
+        dependencies,
+        hooks: {
+          onExitIntent: (order) => exitIntentSubject.next(order)
+          ,
+          onSnapshot: (snapshot) => {
+            snapshotLog.push(snapshot);
+            if (debugE2E) {
+              console.log('[runtime.e2e] snapshot', snapshot.positions['BTCUSDT']);
+            }
+          }
+        }
+      });
+
+      const emitMark = (tick: Omit<MarketTick, 't'>) => {
+        manualClock.advance(1);
+        marks$.next({ ...tick, t: manualClock.now() });
+      };
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const orderEvents$ = eventStore.stream$.pipe(filter(isOrderNewEvent));
+
+      emitMark({ symbol: 'BTCUSDT', bid: 100, ask: 100.1, last: 100.05 });
+      const syntheticOrderId = randomUUID();
+      const fill: Fill = {
+        id: randomUUID(),
+        orderId: syntheticOrderId,
+        t: manualClock.now(),
+        symbol: 'BTCUSDT',
+        px: 100.1,
+        qty: 0.5,
+        side: 'BUY'
+      };
+      fillsSubject.next(fill);
+      await eventStore.append({
+        id: fill.id,
+        type: 'order.fill',
+        data: fill,
+        ts: fill.t
+      });
+
+      const analyticsEvent = await waitForEvent(
+        eventStore.stream$.pipe(filter((evt) => evt.type === 'pnl.analytics')),
+        2_000
+      );
+      debugLog('analytics event', analyticsEvent.data);
+
+      const exitIntentPromise = firstValueFrom(exitIntentSubject);
+      const exitOrderEventPromise = waitForEvent(
+        orderEvents$.pipe(filter(isExitOrderEvent)),
+        5_000,
+        async () => {
+          const snapshot = await eventStore.read();
+          const summary = snapshot.map((evt) => ({
+            type: evt.type,
+            meta: (evt.data as any)?.meta
+          }));
+          debugLog('exit wait timeout events', summary);
+          if (debugE2E) {
+            console.log('[runtime.e2e] exit wait timeout events', summary);
+          }
+        }
+      );
+
+      manualClock.advance(600);
+      emitMark({ symbol: 'BTCUSDT', bid: 100.4, ask: 100.5, last: 100.45 });
+
+      debugLog('waiting for exit intent hook');
+      const exitOrderFromHook = await exitIntentPromise;
+      debugLog('exit intent hook received', exitOrderFromHook.id);
+      const exitOrderEvent = await exitOrderEventPromise;
+      const exitOrder = exitOrderEvent.data as OrderNew;
+      expect(exitOrderFromHook.meta?.exit).toBe(true);
+      expect(exitOrder.meta?.exit).toBe(true);
+      expect(exitOrder.meta?.reason).toBe('EXIT_TIME');
+      expect(exitOrder.side).toBe('SELL');
+
+      handle.stop();
+      process.env.PERSIST_THROTTLE_MS = previousThrottle;
+      marks$.complete();
+      exitIntentSubject.complete();
+    }
+  );
 });
 
 const mockBalanceProvider = (instrument: InstrumentMetadata): BalanceProvider => {
@@ -317,3 +536,6 @@ const mockBalanceProvider = (instrument: InstrumentMetadata): BalanceProvider =>
     stop() {}
   } satisfies BalanceProvider;
 };
+const isOrderNewEvent = (event: DomainEvent): event is DomainEvent<'order.new'> => event.type === 'order.new';
+const isExitOrderEvent = (event: DomainEvent<'order.new'>): boolean =>
+  Boolean((event.data as OrderNew).meta?.exit);

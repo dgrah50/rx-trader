@@ -22,6 +22,13 @@ interface StrategyMetrics {
   lastRejectTs: number | null;
 }
 
+interface ExitMetrics {
+  total: number;
+  byReason: Record<string, number>;
+  lastReason: string | null;
+  lastTs: number | null;
+}
+
 export interface StrategyTelemetrySnapshot {
   id: string;
   type: StrategyDefinition['type'];
@@ -39,6 +46,7 @@ export interface StrategyTelemetrySnapshot {
   };
   margin?: StrategyMarginConfig;
   metrics: StrategyMetrics;
+  exits: ExitMetrics;
 }
 
 export interface StrategyTelemetry {
@@ -46,6 +54,7 @@ export interface StrategyTelemetry {
   recordFill: (fill: Fill) => void;
   recordRiskReject: (order: OrderNew, reasons?: string[]) => void;
   recordExecutionReject: (reject: OrderReject) => void;
+  recordExit: (strategyId: string, reason?: string) => void;
   snapshot: () => StrategyTelemetrySnapshot[];
   stop: () => void;
 }
@@ -67,6 +76,13 @@ const createInitialMetrics = (): StrategyMetrics => ({
   lastRejectTs: null
 });
 
+const createExitMetrics = (): ExitMetrics => ({
+  total: 0,
+  byReason: {},
+  lastReason: null,
+  lastTs: null
+});
+
 const snapshotEntry = (entry: TelemetryEntry): StrategyTelemetrySnapshot => ({
   id: entry.id,
   type: entry.type,
@@ -79,7 +95,13 @@ const snapshotEntry = (entry: TelemetryEntry): StrategyTelemetrySnapshot => ({
   params: entry.params,
   fees: entry.fees,
   margin: entry.margin,
-  metrics: { ...entry.metrics }
+  metrics: { ...entry.metrics },
+  exits: {
+    total: entry.exits.total,
+    byReason: { ...entry.exits.byReason },
+    lastReason: entry.exits.lastReason,
+    lastTs: entry.exits.lastTs
+  }
 });
 
 const selectStrategyId = (
@@ -128,6 +150,7 @@ export const createStrategyTelemetry = (params: {
       fees: runtime.fees,
       margin: runtime.margin,
       metrics: createInitialMetrics(),
+      exits: createExitMetrics(),
       definition: runtime.definition
     };
     entries.set(entry.id, entry);
@@ -190,6 +213,16 @@ export const createStrategyTelemetry = (params: {
     orderToStrategy.delete(reject.id);
   };
 
+  const recordExit = (strategyId: string, reason?: string) => {
+    if (!reason) return;
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    entry.exits.total += 1;
+    entry.exits.byReason[reason] = (entry.exits.byReason[reason] ?? 0) + 1;
+    entry.exits.lastReason = reason;
+    entry.exits.lastTs = clock.now();
+  };
+
   const snapshot = () => Array.from(entries.values()).map((entry) => snapshotEntry(entry));
 
   const stop = () => {
@@ -203,6 +236,7 @@ export const createStrategyTelemetry = (params: {
     recordFill,
     recordRiskReject,
     recordExecutionReject,
+    recordExit,
     snapshot,
     stop
   };

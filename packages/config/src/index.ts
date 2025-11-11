@@ -9,6 +9,9 @@ import {
   parseStrategyType
 } from '@rx-trader/core/constants';
 import { safeParse } from '@rx-trader/core/validation';
+import { exitConfigSchema, type ExitConfig } from './strategy-exits.schema';
+export type { ExitConfig } from './strategy-exits.schema';
+export { exitConfigSchema } from './strategy-exits.schema';
 import type { RebalanceTarget } from '@rx-trader/portfolio/rebalancer/types';
 
 const DEFAULT_CONFIG_FILENAME = 'rx.config.json';
@@ -443,6 +446,8 @@ const parseRebalanceTargets = (raw: string): RebalanceTarget[] => {
   }
 };
 
+const defaultExitConfig = exitConfigSchema.parse({ enabled: false });
+
 const parseStrategies = (
   raw: string,
   fallbackStrategy: StrategyConfig,
@@ -515,6 +520,7 @@ const normalizeStrategyDefinition = (
   };
 
   const budget = normalizeBudget(entry.budget, baseBudget);
+  const exit = normalizeExit(entry.exit, index);
 
   return {
     id,
@@ -525,7 +531,8 @@ const normalizeStrategyDefinition = (
     primaryFeed,
     extraFeeds,
     params,
-    budget
+    budget,
+    exit
   } satisfies StrategyDefinition;
 };
 
@@ -566,8 +573,21 @@ const createFallbackStrategyDefinition = (
     notional: risk.notional,
     maxPosition: risk.maxPosition,
     throttle: { ...risk.throttle }
-  }
+  },
+  exit: defaultExitConfig
 });
+
+const normalizeExit = (raw: unknown, index?: number): ExitConfig => {
+  const label = index != null ? `STRATEGIES[${index}].exit` : 'STRATEGIES.exit';
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return defaultExitConfig;
+  }
+  try {
+    return exitConfigSchema.parse({ enabled: false, ...(raw as Record<string, unknown>) });
+  } catch (error) {
+    throw new Error(`${label} is invalid: ${(error as Error).message}`);
+  }
+};
 
 export interface StrategyConfig {
   type: StrategyType;
@@ -633,6 +653,7 @@ export interface StrategyDefinition extends StrategyConfig {
   mode: StrategyMode;
   priority: number;
   budget: StrategyBudgetConfig;
+  exit?: ExitConfig;
 }
 
 export const loadConfigDetails = (overrides: EnvOverrides = {}): LoadedConfigDetails => {

@@ -71,7 +71,7 @@ export const createMarketExposureGuard = (opts: MarketExposureGuardOptions): Mar
   const inspect = () => {
     const collateral = opts.getAvailable(opts.venue, opts.quoteAsset) ?? 0;
     const availableBudget = mode === 'cash' ? 0 : collateral * leverage - committedMargin;
-    const productType = isPerp ? 'PERP' : 'SPOT';
+    const productType: 'SPOT' | 'PERP' = isPerp ? 'PERP' : 'SPOT';
     return {
       mode,
       productType,

@@ -112,4 +112,20 @@ describe('createStrategyTelemetry', () => {
     const metrics = telemetry.snapshot()[0]!.metrics;
     expect(metrics.rejects).toBe(1);
   });
+
+  it('records exit counts and reasons per strategy', () => {
+    const { runtime } = createRuntime('strat-exit');
+    const telemetry = createStrategyTelemetry({ runtimes: [runtime] });
+
+    telemetry.recordExit('strat-exit', 'EXIT_TIME');
+    telemetry.recordExit('strat-exit', 'EXIT_TIME');
+    telemetry.recordExit('strat-exit', 'EXIT_TP');
+
+    const snapshot = telemetry.snapshot()[0]!;
+    expect(snapshot.exits.total).toBe(3);
+    expect(snapshot.exits.byReason.EXIT_TIME).toBe(2);
+    expect(snapshot.exits.byReason.EXIT_TP).toBe(1);
+    expect(snapshot.exits.lastReason).toBe('EXIT_TP');
+    expect(snapshot.exits.lastTs).toBeGreaterThan(0);
+  });
 });

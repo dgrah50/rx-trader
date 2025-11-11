@@ -8,3 +8,4 @@ export * from './intentReconciler';
 export * from './types';
 export * from './strategyScheduler';
 export * from './strategyTelemetry';
+export * from './exitEngine';
