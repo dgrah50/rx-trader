@@ -68,7 +68,197 @@ The entire flow runs in one Bun process; observables keep the codepath hot, whil
 
 Persistence is therefore part of the production contract: if an event hits risk/execution, it is durably recorded, replayable, and visible through the control plane.
 
---
+---
+
+## Event Bus Architecture
+
+The system uses a **centralized EventBus** to decouple components and provide unified observability. Every significant state transition—from raw ticks to fills—emits a domain event that flows through both the live pipeline and persistence/telemetry sinks.
+
+### Design Principles
+
+1. **Single source of truth** – All components emit to the same `EventBus` instance. No hidden channels; every event is observable.
+2. **Immutable events** – Once emitted, events are never mutated. Projections consume them in append-only fashion.
+3. **Strongly typed** – Domain event types (defined in `packages/core/src/domain/events.ts`) use discriminated unions for type safety.
+4. **Non-blocking** – Event emission is synchronous, but subscriptions run async. Heavy I/O (persistence, external APIs) happens off the hot path.
+
+### Hot Path vs Cold Path
+
+The system uses a **hybrid architecture** for performance:
+
+#### 🔥 Hot Path (RxJS Observables)
+The **critical trading pipeline** uses direct RxJS observable chains to minimize latency and control backpressure:
+
+```typescript
+feeds.ticks$ 
+  → strategies.signals$ 
+  → intentBuilder(signals$, marks$) 
+  → riskFilter.check(intents$)
+  → execution.submit(approved$)
+  → execution.fills$
+  → portfolio.snapshots$
+```
+
+**Why RxJS for hot path:**
+- ⚡ **Sub-millisecond latency** - No serialization overhead
+- 🎯 **Compile-time type safety** - `Observable<Tick>` vs runtime `DomainEvent` unions
+- 🚦 **Backpressure control** - Can drop ticks if overwhelmed without blocking
+- 🔗 **Direct data flow** - No intermediate pub/sub layer
+
+**Examples of hot-path streams:**
+- `FeedManager.ticks$` - Raw WebSocket tick stream (too high-volume for EventBus)
+- `FeedManager.marks$` - Price marks for strategy calculations
+- `portfolio.snapshots$` - Position/balance recomputation on every fill
+- `exitEngine.exitIntents$` - Time-based and threshold-based exit signals
+- `reconcile$` - Feedback loop for risk state corrections
+
+#### ❄️ Cold Path (EventBus)
+The EventBus provides **observability, persistence, and UI updates** without blocking trading decisions:
+
+```typescript
+// Hot path continues immediately
+approved$.subscribe((decision) => {
+  pendingOrders.set(decision.order.id, decision.order);  // State update
+  execution.submit(decision.order);                       // Next stage
+  
+  // Cold path: also log to EventBus (async, doesn't block)
+  eventBus.emit({ 
+    type: 'order.new', 
+    data: decision.order,
+    ts: Date.now() 
+  });
+});
+```
+
+**Why EventBus for cold path:**
+- 📊 **Telemetry** - Capture snapshots of pipeline stages for debugging
+- 💾 **Persistence** - Async write to SQLite without blocking trades
+- 🖥️ **Dashboard** - Real-time UI updates via SSE streams
+- 🔍 **Audit trail** - Every significant decision recorded for compliance
+
+**EventBus captures snapshots of:**
+- `strategy.signal` - When strategy generates a signal
+- `strategy.intent` - When intent builder creates an order intent
+- `risk.check` - Risk filter decisions (passed/rejected with reasons)
+- `order.new` - Order submission attempts
+- `order.fill` / `order.reject` - Execution outcomes
+- `portfolio.snapshot` - Throttled (250ms) position/balance states
+- `pnl.analytics` - Throttled PnL calculations
+
+#### Trade-offs Comparison
+
+| Concern | Hot Path (RxJS) | Cold Path (EventBus) |
+|---------|------------------|----------------------|
+| **Latency** | Sub-millisecond | 1-10ms acceptable |
+| **Volume** | Unlimited (ticks, marks) | Moderate (snapshots) |
+| **Backpressure** | Critical (drop overload) | Buffered/throttled |
+| **Type safety** | Compile-time | Runtime discriminated unions |
+| **Purpose** | Make trading decisions | Record what happened |
+| **Subscribers** | Next pipeline stage | Telemetry, persistence, UI |
+
+This hybrid design ensures the **tick-to-trade critical path stays fast** while providing **comprehensive observability** for humans and tooling.
+
+---
+
+| Event Type | Purpose | Emitted By | Consumed By |
+|------------|---------|------------|-------------|
+| `strategy.signal` | Strategy generated a trading signal | Strategy orchestrator | Telemetry, dashboard |
+| `strategy.intent` | Intent created from signal | Intent builder | Telemetry, pre-trade risk |
+| `risk.check` | Pre-trade risk decision (pass/reject) | Risk filter | Telemetry, dashboard, reconciliation |
+| `order.new` | Order approved and submitted | Execution manager | Telemetry, intent reconciler |
+| `order.fill` | Order executed | Execution adapter | Portfolio, PnL, balance updates |
+| `order.reject` | Order rejected by venue | Execution adapter | Reconciliation, telemetry |
+| `portfolio.snapshot` | Position/balance state | Portfolio stream | Persistence, dashboard |
+| `pnl.analytics` | Realized/unrealized PnL | Analytics stream | Persistence, dashboard, alerts |
+
+### Event Flow Example
+
+```
+Tick arrives → Strategy processes → Emits strategy.signal
+                                      ↓
+                         Intent builder → Emits strategy.intent
+                                      ↓
+                         Risk filter → Emits risk.check (passed=true)
+                                      ↓
+                         Execution → Emits order.new
+                                      ↓
+                         Venue adapter → Emits order.fill
+                                      ↓
+                         Portfolio updates → Emits portfolio.snapshot
+```
+
+Each stage is **loosely coupled**—strategies don't know about risk filters, risk filters don't know about execution. The EventBus provides the wiring.
+
+### EventBus Implementation
+
+**Location**: `packages/core/src/structures/EventBus.ts`
+
+```typescript
+export class EventBus {
+  emit<T extends DomainEvent['type']>(event: Extract<DomainEvent, { type: T }>): void;
+  on<T extends DomainEvent['type']>(type: T): Observable<Extract<DomainEvent, { type: T }>>;
+}
+```
+
+Usage example:
+```typescript
+// Emit an event
+eventBus.emit({
+  id: crypto.randomUUID(),
+  type: 'strategy.signal',
+  data: { symbol: 'BTCUSDT', action: 'BUY', ... },
+  ts: Date.now()
+});
+
+// Subscribe to events
+eventBus.on('order.fill').subscribe((event) => {
+  console.log('Fill received:', event.data);
+});
+```
+
+### Telemetry & Dashboard Integration
+
+The **Strategy Flow** tab in the dashboard visualizes event flow in real-time:
+
+1. **SSE Stream** – Dashboard connects to `GET /events?types=strategy.signal,risk.check,order.new,...`
+2. **RingBuffer** – Last 100 events per type are kept in memory via `RingBuffer<DomainEvent>`
+3. **Real-time updates** – New events pushed via Server-Sent Events with sub-second latency
+4. **Node Details Panel** – Clicking a pipeline stage (Strategy, Risk Filter, Execution) shows filtered events for that stage
+
+**Event filtering by strategy**:
+```typescript
+// Each event carries metadata.strategyId
+eventBus.on('risk.check')
+  .pipe(filter(e => e.metadata?.strategyId === 'momentum-main'))
+  .subscribe(...)
+```
+
+### Reconciliation via Events
+
+The **risk reconciliation** mechanism prevents state drift:
+
+```typescript
+// When order rejected, emit to reconcile$ 
+execution.rejects$.subscribe((reject) => {
+  const order = pendingOrders.get(reject.id);
+  reconcile$?.next(order);  // Triggers risk.revert()
+});
+
+// Risk filter subscribes to reconcile$
+reconcile$.subscribe((order) => {
+  riskEngine.revert(order);  // Undo optimistic state update
+});
+```
+
+This feedback loop uses the same event-driven pattern: rejected orders emit events that trigger state corrections.
+
+### Observability Benefits
+
+✅ **Unified debugging** – All pipeline stages visible in one stream  
+✅ **Audit trail** – Every decision (signal, risk check, fill) is recorded  
+✅ **Real-time monitoring** – Dashboard shows live event counts and latency  
+✅ **Replay capability** – Events persisted to SQLite can be replayed for analysis
+
+---
 
 ## Packages
 - `packages/core` – Domain schemas (Zod) and constants for ticks, orders, events, portfolio, time.

@@ -67,7 +67,7 @@ export const createPreTradeRisk = (
   const exposures: Record<string, number> = {};
   let orderLog: Array<{ ts: number }> = [];
 
-  return (order: OrderNew): RiskDecision => {
+  const check = (order: OrderNew): RiskDecision => {
     const reasons: string[] = [];
     const meta = order.meta as Record<string, unknown> | undefined;
     const isExit = Boolean(meta?.exit);
@@ -141,6 +141,15 @@ export const createPreTradeRisk = (
       notional: allowed ? notionalWithFees : undefined
     };
   };
+
+  const revert = (order: OrderNew) => {
+    const symbol = order.symbol;
+    const position = exposures[symbol] ?? 0;
+    const next = position - (order.side === 'BUY' ? order.qty : -order.qty);
+    exposures[symbol] = next;
+  };
+
+  return { check, revert };
 };
 
 export const splitRiskStream = (
@@ -148,7 +157,8 @@ export const splitRiskStream = (
   limits: RiskLimits,
   clock?: Clock,
   accountGuard?: AccountExposureGuard,
-  marketExposureGuard?: { updateMargin: (order: OrderNew) => void; canAccept: (order: OrderNew, notional: number) => boolean }
+  marketExposureGuard?: { updateMargin: (order: OrderNew) => void; canAccept: (order: OrderNew, notional: number) => boolean },
+  reconcile$?: Observable<OrderNew>
 ) => {
   const engine = createPreTradeRisk(
     limits,
@@ -156,7 +166,14 @@ export const splitRiskStream = (
     accountGuard,
     marketExposureGuard
   );
-  const decisions$ = orders$.pipe(map((order) => engine(order)), share());
+
+  if (reconcile$) {
+    reconcile$.subscribe((order) => {
+      engine.revert(order);
+    });
+  }
+
+  const decisions$ = orders$.pipe(map((order) => engine.check(order)), share());
   const allowed$ = decisions$.pipe(filter((decision) => decision.allowed));
   const rejected$ = decisions$.pipe(filter((decision) => !decision.allowed));
   return [allowed$, rejected$];

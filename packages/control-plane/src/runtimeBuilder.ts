@@ -61,6 +61,7 @@ export interface RuntimeBuilderResult {
   marginGuard?: ReturnType<typeof createMarketExposureGuard>;
   exitIntentSink: Subject<OrderNew>;
   eventBus: EventBus;
+  reconcile$?: Subject<OrderNew>;
 }
 
 export interface RuntimeDependencies {
@@ -172,6 +173,8 @@ export const buildRuntime = async (
   const strategyFactory = deps.createStrategy$ ?? createStrategy$;
   const intentBuilderFactory = deps.createIntentBuilder ?? createIntentBuilder;
 
+  const executionRejects$ = new Subject<OrderNew>();
+
   const orchestrator = createStrategyOrchestrator({
     strategies: runtimeStrategies,
     executionAccount: config.execution.account,
@@ -184,7 +187,8 @@ export const buildRuntime = async (
     createStrategy$: strategyFactory,
     createIntentBuilder: intentBuilderFactory,
     metrics,
-    onFeedTick: () => metrics.ticksIngested.inc()
+    onFeedTick: () => metrics.ticksIngested.inc(),
+    reconcile$: executionRejects$
   });
 
   const exitIntentSink = new Subject<OrderNew>();
@@ -210,7 +214,8 @@ export const buildRuntime = async (
     },
     boundClock,
     accountGuard,
-    primaryMargin.mode === 'cash' ? undefined : marketGuard
+    primaryMargin.mode === 'cash' ? undefined : marketGuard,
+    executionRejects$
   );
 
   const executionFactory = deps.createExecutionManager ?? createExecutionManager;
@@ -248,7 +253,8 @@ export const buildRuntime = async (
     accountGuard,
     marginGuard: primaryMargin.mode === 'cash' ? undefined : marketGuard,
     exitIntentSink,
-    eventBus
+    eventBus,
+    reconcile$: executionRejects$
   };
 };
 

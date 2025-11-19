@@ -6,11 +6,13 @@ import type { PortfolioSnapshot } from '@rx-trader/core/domain';
 const snapshot = (overrides: Partial<PortfolioSnapshot>): PortfolioSnapshot => ({
   t: Date.now(),
   positions: {},
-  nav: 0,
+  nav: 10000,
   pnl: 0,
   realized: 0,
+  netRealized: 0,
+  grossRealized: 0,
   unrealized: 0,
-  cash: 0,
+  cash: 10000,
   feesPaid: 0,
   ...overrides
 });

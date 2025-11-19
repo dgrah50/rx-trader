@@ -49,7 +49,7 @@ const makeDefinition = (overrides: Partial<StrategyDefinition> = {}): StrategyDe
     maxPosition: 5,
     throttle: { windowMs: 1000, maxCount: 2 }
   },
-  exit: overrides.exit ?? { enabled: false }
+  exit: overrides.exit ?? { enabled: false, logVerbose: false }
 });
 
 const makeFeedManager = (symbol: string): FeedManagerResult => ({

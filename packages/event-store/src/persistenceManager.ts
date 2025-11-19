@@ -98,6 +98,8 @@ export const createPersistenceManager = (options: PersistenceManagerOptions): Pe
           options.logger?.error?.({ error }, 'Inline event append failed');
         }
       );
+    } else {
+      options.store.stream$.next(event);
     }
     metrics && sampleDepth();
   };

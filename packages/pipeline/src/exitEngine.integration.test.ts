@@ -42,6 +42,7 @@ describe('ExitEngine integration', () => {
       accountId: 'TEST',
       exit: {
         enabled: true,
+        logVerbose: false,
         fairValue: { enabled: true, closeOnSignalFlip: true, epsilonBps: 0 }
       },
       clock,

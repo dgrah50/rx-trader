@@ -15,6 +15,9 @@ export class QuoteReserveGuard implements AccountExposureGuard {
   private readonly getBalanceInternal: QuoteReserveGuardOptions['getBalance'];
   private readonly pending = new Map<string, number>();
   private pendingTotal = 0;
+  // Track pending base asset from BUY fills not yet processed
+  private readonly pendingBaseAdds = new Map<string, number>();
+  private pendingBaseAddsTotal = 0;
 
   constructor(options: QuoteReserveGuardOptions) {
     this.venue = options.venue;
@@ -30,7 +33,8 @@ export class QuoteReserveGuard implements AccountExposureGuard {
       return available - this.pendingTotal;
     }
     if (venue === this.venue && asset === this.baseAsset) {
-      return entry?.available ?? 0;
+      // Add pending base asset from BUY orders that will fill
+      return (entry?.available ?? 0) + this.pendingBaseAddsTotal;
     }
     return entry?.available ?? null;
   };
@@ -64,9 +68,28 @@ export class QuoteReserveGuard implements AccountExposureGuard {
     this.pendingTotal = Math.max(0, this.pendingTotal - amount);
   };
 
+  // Track base asset pending from BUY orders
+  reserveBase = (orderId: string, qty: number) => {
+    if (!qty || qty <= 0) return;
+    const existing = this.pendingBaseAdds.get(orderId) ?? 0;
+    const next = existing + qty;
+    this.pendingBaseAdds.set(orderId, next);
+    this.pendingBaseAddsTotal += qty;
+  };
+
+  // Release base asset reservation when fill is processed
+  releaseBase = (orderId: string) => {
+    const qty = this.pendingBaseAdds.get(orderId);
+    if (qty === undefined) return;
+    this.pendingBaseAdds.delete(orderId);
+    this.pendingBaseAddsTotal = Math.max(0, this.pendingBaseAddsTotal - qty);
+  };
+
   inspect = () => ({
     pendingTotal: this.pendingTotal,
-    pending: Array.from(this.pending.entries()).map(([orderId, amount]) => ({ orderId, amount }))
+    pending: Array.from(this.pending.entries()).map(([orderId, amount]) => ({ orderId, amount })),
+    pendingBaseAddsTotal: this.pendingBaseAddsTotal,
+    pendingBaseAdds: Array.from(this.pendingBaseAdds.entries()).map(([orderId, qty]) => ({ orderId, qty }))
   });
 }
 

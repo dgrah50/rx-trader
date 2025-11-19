@@ -5,6 +5,8 @@ import type { createEventStore } from '@rx-trader/event-store';
 import type { LoggerInstance, MetricsInstance } from '@rx-trader/pipeline';
 import type { BalanceSyncTelemetry } from '@rx-trader/portfolio';
 
+import type { DomainEvent } from '@rx-trader/core/domain';
+
 type EventStoreInstance = Awaited<ReturnType<typeof createEventStore>>;
 
 interface ApiServerOptions {
@@ -16,6 +18,7 @@ interface ApiServerOptions {
   runtimeMeta?: {
     live?: boolean;
     strategies?: StrategyRuntimeStatus[] | (() => StrategyRuntimeStatus[]);
+    events?: () => DomainEvent[];
   };
   accounting?: {
     balanceTelemetry?: () => BalanceSyncTelemetry;

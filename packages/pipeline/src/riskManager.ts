@@ -23,14 +23,16 @@ export const createRiskStreams = (
   config: RiskConfig,
   clock?: Clock,
   accountGuard?: AccountExposureGuard,
-  marketExposureGuard?: { updateMargin: (order: OrderNew) => void; canAccept: (order: OrderNew, notional: number) => boolean }
+  marketExposureGuard?: { updateMargin: (order: OrderNew) => void; canAccept: (order: OrderNew, notional: number) => boolean },
+  reconcile$?: Observable<OrderNew>
 ): RiskStreams => {
   const [approved$, rejected$] = splitRiskStream(
     intents$,
     config,
     clock,
     accountGuard,
-    marketExposureGuard
+    marketExposureGuard,
+    reconcile$
   );
   return { approved$, rejected$ };
 };

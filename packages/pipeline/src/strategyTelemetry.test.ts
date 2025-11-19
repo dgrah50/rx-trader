@@ -14,7 +14,7 @@ const createDefinition = (id: string): StrategyDefinition => ({
   mode: 'live',
   priority: 0,
   budget: {},
-  exit: { enabled: false }
+  exit: { enabled: false, logVerbose: false }
 });
 
 describe('createStrategyTelemetry', () => {

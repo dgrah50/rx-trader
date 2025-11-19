@@ -1,3 +1,4 @@
+import { EVENT_TYPE } from '@rx-trader/core';
 import { monitorPostTradeRisk } from '@rx-trader/risk/postTrade';
 import { portfolio$, portfolioAnalytics$ } from '@rx-trader/portfolio';
 import type {
@@ -85,12 +86,13 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     accountGuard,
     marginGuard,
     exitIntentSink,
-    eventBus // Destructure EventBus
+    eventBus, // Destructure EventBus
+    reconcile$
   } = await buildRuntime({ ...options, clock }, options.dependencies);
 
   // Instantiate RingBuffer for high-frequency event storage (hot store)
   const { RingBuffer } = await import('@rx-trader/core'); // Dynamic import or add to top-level imports
-  const ringBuffer = new RingBuffer(1000);
+  const ringBuffer = new RingBuffer<DomainEvent>(1000);
 
   // Wire EventBus to RingBuffer (All events go to RingBuffer)
   eventBus.onAll().subscribe((event) => {
@@ -98,17 +100,17 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   });
 
   // Wire EventBus to Persistence (Transactional events go to SQLite)
-  const PERSISTED_EVENTS = new Set([
-    'order.new',
-    'order.fill',
-    'order.reject',
-    'order.cancel',
-    'order.ack',
-    'portfolio.snapshot',
-    'pnl.analytics',
-    'account.balance.adjusted',
-    'account.transfer',
-    'risk.check'
+  const PERSISTED_EVENTS = new Set<string>([
+    EVENT_TYPE.ORDER_NEW,
+    EVENT_TYPE.ORDER_FILL,
+    EVENT_TYPE.ORDER_REJECT,
+    EVENT_TYPE.ORDER_CANCEL,
+    EVENT_TYPE.ORDER_ACK,
+    EVENT_TYPE.PORTFOLIO_SNAPSHOT,
+    EVENT_TYPE.PNL_ANALYTICS,
+    EVENT_TYPE.ACCOUNT_BALANCE_ADJUSTED,
+    EVENT_TYPE.ACCOUNT_TRANSFER,
+    EVENT_TYPE.RISK_CHECK
   ]);
 
   eventBus.onAll().subscribe((event) => {
@@ -277,8 +279,11 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     });
   });
 
+  const pendingOrders = new Map<string, OrderNew>();
+
   const fills$ = execution.fills$;
   fills$.subscribe((fill: Fill) => {
+    pendingOrders.delete(fill.orderId);
     const balancesBefore = captureBalances();
     const projection = projectBalances(balancesBefore, fill);
     logAudit('fill', {
@@ -306,9 +311,20 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
         quoteReserve: describeQuoteReserve()
       });
     }
+
+    // Release base asset reservation for BUY fills
+    if (fill.side === 'BUY') {
+      (accountGuard as any).releaseBase?.(fill.orderId);
+    }
   });
 
   execution.rejects$.subscribe((reject) => {
+    const order = pendingOrders.get(reject.id);
+    if (order) {
+      pendingOrders.delete(reject.id);
+      reconcile$?.next(order);
+    }
+
     // Emit execution reject to EventBus
     eventBus.emit({
         id: crypto.randomUUID(),
@@ -411,6 +427,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   });
 
   approved$.subscribe(async (decision) => {
+    pendingOrders.set(decision.order.id, decision.order);
     const px = getOrderPx(decision.order);
     const notional = decision.notional ?? (px ? Math.abs(decision.order.qty * px) : null);
     logAudit('risk-approved', {
@@ -426,9 +443,12 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     });
     if (accountGuard && decision.notional && decision.order.side === 'BUY') {
       accountGuard.reserve?.(decision.order.id, decision.notional);
+      // Also reserve the base asset we expect to receive
+      (accountGuard as any).reserveBase?.(decision.order.id, decision.order.qty);
       logAudit('quote-reserve', {
         orderId: decision.order.id,
         reserved: decision.notional,
+        baseQty: decision.order.qty,
         quoteReserve: describeQuoteReserve()
       });
     }
@@ -470,6 +490,9 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       });
     } catch (error) {
       release();
+      pendingOrders.delete(decision.order.id);
+      reconcile$?.next(decision.order);
+
       if (error instanceof ExecutionCircuitOpenError) {
         const reason = `circuit-open:${execution.adapter.id}`;
         logger.error({ orderId: decision.order.id, reason }, 'Execution blocked by circuit');

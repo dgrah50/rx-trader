@@ -22,7 +22,8 @@ import {
   accountTransferSchema
 } from './account';
 
-const domainEventTypes = [
+// Export for shared usage across frontend/backend
+export const domainEventTypes = [
   'market.tick',
   'market.bar',
   'strategy.signal',
@@ -45,7 +46,31 @@ const domainEventTypes = [
   'account.transfer.requested'
 ] as const;
 
-type DomainEventType = (typeof domainEventTypes)[number];
+export type DomainEventType = (typeof domainEventTypes)[number];
+
+// Type-safe event type constants (alternative to magic strings)
+export const EVENT_TYPE = {
+  MARKET_TICK: 'market.tick' as const,
+  MARKET_BAR: 'market.bar' as const,
+  STRATEGY_SIGNAL: 'strategy.signal' as const,
+  STRATEGY_INTENT: 'strategy.intent' as const,
+  RISK_CHECK: 'risk.check' as const,
+  ORDER_NEW: 'order.new' as const,
+  ORDER_ACK: 'order.ack' as const,
+  ORDER_REJECT: 'order.reject' as const,
+  ORDER_CANCEL: 'order.cancel' as const,
+  ORDER_FILL: 'order.fill' as const,
+  PORTFOLIO_SNAPSHOT: 'portfolio.snapshot' as const,
+  POSITION_MARK: 'position.mark' as const,
+  SENTIMENT_UPDATE: 'sentiment.update' as const,
+  PNL_ANALYTICS: 'pnl.analytics' as const,
+  BACKTEST_ARTIFACT: 'backtest.artifact' as const,
+  ACCOUNT_BALANCE_ADJUSTED: 'account.balance.adjusted' as const,
+  ACCOUNT_BALANCE_SNAPSHOT: 'account.balance.snapshot' as const,
+  ACCOUNT_MARGIN_UPDATED: 'account.margin.updated' as const,
+  ACCOUNT_TRANSFER: 'account.transfer' as const,
+  ACCOUNT_TRANSFER_REQUESTED: 'account.transfer.requested' as const
+} satisfies Record<string, DomainEventType>;
 
 export interface DomainEvent<TType extends DomainEventType = DomainEventType, TData = unknown> {
   id: string;

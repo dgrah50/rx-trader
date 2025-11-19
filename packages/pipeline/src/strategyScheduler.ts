@@ -1,5 +1,5 @@
 import { EMPTY, merge, share } from 'rxjs';
-import { map, tap } from 'rxjs/operators';
+import { map, tap, filter } from 'rxjs/operators';
 import type { Observable } from 'rxjs';
 import type { OrderNew } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
@@ -29,6 +29,7 @@ export interface StrategyOrchestratorOptions {
   createIntentBuilder?: typeof defaultCreateIntentBuilder;
   metrics?: Metrics;
   onFeedTick?: () => void;
+  reconcile$?: Observable<OrderNew>;
 }
 
 export interface StrategyRuntime {
@@ -137,14 +138,62 @@ export const createStrategyOrchestrator = (
       share()
     );
 
+    const strategyReconcile$ = options.reconcile$?.pipe(
+      filter((order) => (order.meta as any)?.strategyId === definition.id)
+    );
+
     const [budgetApproved$, budgetRejected$] = splitRiskStream(
       strategyIntents$,
       buildStrategyRiskLimits(definition, options.baseRisk),
       clock,
-      options.accountGuard
+      options.accountGuard,
+      undefined,
+      strategyReconcile$
     );
 
-    const approvedOrders$ = budgetApproved$.pipe(map((decision) => decision.order), share());
+    // Emit risk check events using tap() to keep them in the pipeline
+    const approvedOrders$ = budgetApproved$.pipe(
+      tap((decision) => {
+        options.eventBus.emit({
+          id: crypto.randomUUID(),
+          type: 'risk.check',
+          data: {
+            orderId: decision.order.id,
+            passed: true,
+            reasons: [],
+            metadata: { strategyId: definition.id }
+          },
+          ts: decision.order.t,
+          metadata: { strategyId: definition.id }
+        });
+      }),
+      map((decision) => decision.order),
+      share()
+    );
+
+    // Also emit events for rejections - MUST subscribe to force tap() execution
+    const rejectsWithEvents$ = budgetRejected$.pipe(
+      tap((decision) => {
+        options.eventBus.emit({
+          id: crypto.randomUUID(),
+          type: 'risk.check',
+          data: {
+            orderId: decision.order.id,
+            passed: false,
+            reasons: decision.reasons ?? [],
+            metadata: { strategyId: definition.id }
+          },
+          ts: decision.order.t,
+          metadata: { strategyId: definition.id }
+        });
+      }),
+      share()
+    );
+
+    // Force subscription to ensure rejection events are emitted
+    // (Telemetry and other consumers may not subscribe immediately)
+    rejectsWithEvents$.subscribe(); // Keep the observable hot
+
     const liveIntents$ = definition.mode === 'sandbox' ? EMPTY : approvedOrders$;
     const intents$ = liveIntents$.pipe(share());
 
@@ -156,7 +205,7 @@ export const createStrategyOrchestrator = (
       signals$: rawSignals$,
       intents$,
       rawIntents$: strategyIntents$,
-      rejects$: budgetRejected$,
+      rejects$: rejectsWithEvents$,
       fees: runtimeConfig.fees,
       margin: runtimeConfig.margin,
       exit: runtimeConfig.exit

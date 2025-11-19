@@ -84,7 +84,7 @@ export const useStrategySelection = (
 
   const aggregatedMetrics = useMemo(() => accumulateMetrics(rows), [rows]);
 
-  const options = useMemo<StrategyOption[]>(() => {
+  const strategyOptions = useMemo<StrategyOption[]>(() => {
     return [
       { id: 'all', label: 'All strategies' },
       ...rows.map((row) => ({ id: row.id, label: `${row.id} · ${row.tradeSymbol}` }))
@@ -99,7 +99,7 @@ export const useStrategySelection = (
     selectedStrategyId,
     setSelectedStrategyId,
     aggregatedMetrics,
-    options,
+    options: strategyOptions,
     focusLabel
   };
 };

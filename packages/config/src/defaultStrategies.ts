@@ -20,6 +20,7 @@ export interface StrategyPreset {
 
 const demoExitConfig: ExitConfig = {
   enabled: true,
+  logVerbose: false,
   tpSl: { enabled: true, tpSigma: 1.4, slSigma: 0.9, sigmaLookbackSec: 120, asymmetric: false },
   fairValue: { enabled: true, epsilonBps: 6, closeOnSignalFlip: true },
   time: { enabled: true, maxHoldMs: 180_000, minHoldMs: 10_000 },

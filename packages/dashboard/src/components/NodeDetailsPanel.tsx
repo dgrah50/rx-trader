@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventMessage } from '../types';
+import { EVENT_TYPE } from '@rx-trader/core';
 
 interface NodeDetailsPanelProps {
   strategyId: string;
@@ -27,14 +28,14 @@ export function NodeDetailsPanel({ strategyId, nodeType, onClose }: NodeDetailsP
         return false; 
       case 'strategy':
       case 'intent':
-        return event.type === 'order.new';
+        return event.type === EVENT_TYPE.ORDER_NEW;
       case 'risk':
         return (
-          (event.type === 'order.reject' && (event.metadata?.risk === true || (event.data as any)?.reason?.includes('risk'))) ||
-          event.type === 'order.new' // Show passed orders too? Maybe just rejections for "Risk Filter" focus.
+          event.type === EVENT_TYPE.RISK_CHECK ||
+          (event.type === EVENT_TYPE.ORDER_REJECT && (event.metadata?.risk === true || (event.data as any)?.reason?.includes('risk')))
         );
       case 'execution':
-        return event.type === 'order.fill' || event.type === 'order.reject'; // Execution rejects
+        return event.type === EVENT_TYPE.ORDER_FILL || event.type === EVENT_TYPE.ORDER_REJECT; // Execution rejects
       default:
         return false;
     }
@@ -44,8 +45,9 @@ export function NodeDetailsPanel({ strategyId, nodeType, onClose }: NodeDetailsP
   // Let's show Rejections primarily for Risk node as requested previously, but maybe "Passed" events are useful too.
   // For now, let's stick to the logic that was working for Risk, but expanded.
   
+  // Show all risk check events (both passed and rejected) for the Risk node
   const displayEvents = nodeType === 'risk' 
-    ? filteredEvents.filter((e: EventMessage) => e.type === 'order.reject') // Keep it focused on rejections for now as per previous feature
+    ? filteredEvents.filter((e: EventMessage) => e.type === EVENT_TYPE.RISK_CHECK || e.type === EVENT_TYPE.ORDER_REJECT)
     : filteredEvents;
 
   const getTitle = () => {
@@ -96,27 +98,54 @@ export function NodeDetailsPanel({ strategyId, nodeType, onClose }: NodeDetailsP
 }
 
 function EventRow({ event }: { event: EventMessage }) {
-  const isReject = event.type === 'order.reject';
-  const isFill = event.type === 'order.fill';
-  const isNew = event.type === 'order.new';
+  const isReject = event.type === EVENT_TYPE.ORDER_REJECT;
+  const isFill = event.type === EVENT_TYPE.ORDER_FILL;
+  const isRiskCheck = event.type === EVENT_TYPE.RISK_CHECK;
+  
+  if (isRiskCheck) {
+    const data = event.data as any;
+    const passed = data.passed;
+    return (
+      <div className="flex items-center justify-between p-2 rounded bg-background/50 border border-border/50 text-xs">
+        <div className="flex items-center gap-2">
+          <Badge variant={passed ? 'outline' : 'destructive'} className="h-5 px-1.5">
+            {passed ? 'PASSED' : 'REJECTED'}
+          </Badge>
+          <span className="font-mono text-muted-foreground">{data.orderId.slice(0, 8)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+           {!passed && data.reasons?.length > 0 && (
+             <span className="text-destructive">{data.reasons.join(', ')}</span>
+           )}
+           <span className="text-muted-foreground text-[10px]">{format(new Date(event.ts), 'HH:mm:ss.SSS')}</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-start justify-between p-2 rounded bg-muted/30 border border-border/20 text-sm">
-      <div className="flex flex-col gap-1 w-full">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground font-mono">
-            {format(new Date(event.ts), 'HH:mm:ss.SSS')}
+    <div className="flex items-center justify-between p-2 rounded bg-background/50 border border-border/50 text-xs">
+      <div className="flex items-center gap-2">
+        <Badge 
+          variant={isReject ? 'destructive' : isFill ? 'default' : 'secondary'}
+          className="h-5 px-1.5"
+        >
+          {isReject ? 'REJECT' : isFill ? 'FILL' : event.type.split('.')[1].toUpperCase()}
+        </Badge>
+        <span className="font-mono text-muted-foreground">
+          {(event.data as any)?.id?.slice(0, 8) || (event.data as any)?.orderId?.slice(0, 8) || event.id.slice(0, 8)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        {isReject && (
+          <span className="text-destructive">{(event.data as any)?.message || (event.data as any)?.reason || 'Unknown'}</span>
+        )}
+        {isFill && (
+          <span className="text-green-400">
+            {(event.data as any)?.qty} @ {(event.data as any)?.price}
           </span>
-          <Badge 
-            variant={isReject ? 'destructive' : isFill ? 'default' : 'secondary'}
-            className="text-[10px] px-1.5 py-0 h-5"
-          >
-            {event.type}
-          </Badge>
-        </div>
-        <div className="text-xs pl-0 mt-1">
-           {renderEventDetails(event)}
-        </div>
+        )}
+        <span className="text-muted-foreground text-[10px]">{format(new Date(event.ts), 'HH:mm:ss.SSS')}</span>
       </div>
     </div>
   );

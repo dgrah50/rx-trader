@@ -33,31 +33,31 @@ describe('createPreTradeRisk', () => {
     const clock = createManualClock(0);
     const engine = createPreTradeRisk(limits, clock.now);
 
-    const notionalDecision = engine({ ...baseOrder, qty: 20 });
+    const notionalDecision = engine.check({ ...baseOrder, qty: 20 });
     expect(notionalDecision.allowed).toBe(false);
     expect(notionalDecision.reasons).toContain('notional>1000');
 
-    const allowed = engine(baseOrder);
+    const allowed = engine.check(baseOrder);
     expect(allowed.allowed).toBe(true);
 
-    const positionDecision = engine({ ...baseOrder, qty: 10 });
+    const positionDecision = engine.check({ ...baseOrder, qty: 10 });
     expect(positionDecision.allowed).toBe(false);
     expect(positionDecision.reasons).toContain('position>10');
 
-    const bandDecision = engine({ ...baseOrder, px: 150 });
+    const bandDecision = engine.check({ ...baseOrder, px: 150 });
     expect(bandDecision.allowed).toBe(false);
     expect(bandDecision.reasons).toContain('price-band');
 
-    const marketBandDecision = engine({ ...baseOrder, type: 'MKT', px: undefined, meta: { execRefPx: 150 } });
+    const marketBandDecision = engine.check({ ...baseOrder, type: 'MKT', px: undefined, meta: { execRefPx: 150 } });
     expect(marketBandDecision.allowed).toBe(false);
     expect(marketBandDecision.reasons).toContain('price-band');
 
-    const throttleDecision = engine({ ...baseOrder, id: 'order-2' });
+    const throttleDecision = engine.check({ ...baseOrder, id: 'order-2' });
     expect(throttleDecision.allowed).toBe(false);
     expect(throttleDecision.reasons).toContain('throttle');
 
     clock.advance(limits.throttle.windowMs + 1);
-    const postThrottle = engine({ ...baseOrder, id: 'order-3' });
+    const postThrottle = engine.check({ ...baseOrder, id: 'order-3' });
     expect(postThrottle.allowed).toBe(true);
   });
 
@@ -70,7 +70,7 @@ describe('createPreTradeRisk', () => {
       qty: 9,
       meta: { execRefPx: 120, expectedFeeBps: 50 }
     };
-    const decision = engine(marketOrder);
+    const decision = engine.check(marketOrder);
     expect(decision.allowed).toBe(false);
     expect(decision.reasons).toContain('notional>1000');
   });
@@ -90,7 +90,7 @@ describe('createPreTradeRisk', () => {
     };
     const engine = createPreTradeRisk(limits, clock.now, guard);
 
-    const insufficientQuote = engine(baseOrder);
+    const insufficientQuote = engine.check(baseOrder);
     expect(insufficientQuote.allowed).toBe(false);
     expect(insufficientQuote.reasons).toContain('insufficient-quote');
 
@@ -110,12 +110,12 @@ describe('createPreTradeRisk', () => {
       px: 100,
       meta: { expectedFeeBps: 20 }
     };
-    const quoteDecision = feeAwareEngine(quoteTightOrder);
+    const quoteDecision = feeAwareEngine.check(quoteTightOrder);
     expect(quoteDecision.allowed).toBe(false);
     expect(quoteDecision.reasons).toContain('insufficient-quote');
 
     const sellOrder = { ...baseOrder, side: 'SELL' as const, qty: 5 };
-    const sellDecision = engine(sellOrder);
+    const sellDecision = engine.check(sellOrder);
     expect(sellDecision.allowed).toBe(false);
     expect(sellDecision.reasons).toContain('insufficient-base');
   });
@@ -133,7 +133,7 @@ describe('createPreTradeRisk', () => {
       }
     };
     const engine = createPreTradeRisk(limits, undefined, guard);
-    const decision = engine({ ...baseOrder, qty: 3, px: 80 });
+    const decision = engine.check({ ...baseOrder, qty: 3, px: 80 });
     expect(decision.allowed).toBe(false);
     expect(decision.reasons).toContain('insufficient-quote');
   });
@@ -148,9 +148,9 @@ describe('createPreTradeRisk', () => {
       getAvailable: () => 500
     });
     const engine = createPreTradeRisk(limits, undefined, undefined, marginGuard);
-    const shortOk = engine({ ...baseOrder, side: 'SELL', qty: 2, px: 100 });
+    const shortOk = engine.check({ ...baseOrder, side: 'SELL', qty: 2, px: 100 });
     expect(shortOk.allowed).toBe(true);
-    const shortExceeded = engine({ ...baseOrder, id: 'order-spot-margin', side: 'SELL', qty: 9, px: 100 });
+    const shortExceeded = engine.check({ ...baseOrder, id: 'order-spot-margin', side: 'SELL', qty: 9, px: 100 });
     expect(shortExceeded.allowed).toBe(false);
     expect(shortExceeded.reasons).toContain('insufficient-balance');
   });
@@ -165,9 +165,9 @@ describe('createPreTradeRisk', () => {
       getAvailable: () => 800
     });
     const engine = createPreTradeRisk(limits, undefined, undefined, perpGuard);
-    const first = engine({ ...baseOrder, side: 'SELL', qty: 4, px: 100 });
+    const first = engine.check({ ...baseOrder, side: 'SELL', qty: 4, px: 100 });
     expect(first.allowed).toBe(true);
-    const second = engine({ ...baseOrder, id: 'order-perp-2', side: 'SELL', qty: 5, px: 100 });
+    const second = engine.check({ ...baseOrder, id: 'order-perp-2', side: 'SELL', qty: 5, px: 100 });
     expect(second.allowed).toBe(false);
     expect(second.reasons).toContain('insufficient-balance');
   });
@@ -190,7 +190,7 @@ describe('createPreTradeRisk', () => {
       px: undefined,
       meta: { execRefPx: 200 }
     };
-    const decision = engine(marketOrder);
+    const decision = engine.check(marketOrder);
     expect(decision.allowed).toBe(false);
     expect(decision.reasons).toContain('insufficient-quote');
   });
@@ -204,8 +204,8 @@ describe('createPreTradeRisk', () => {
       getAvailable: () => 0
     };
     const engine = createPreTradeRisk(limits, clock.now, guard);
-    engine(baseOrder);
-    const exitOrder = engine({
+    engine.check(baseOrder);
+    const exitOrder = engine.check({
       ...baseOrder,
       id: 'exit-1',
       side: 'SELL',
@@ -214,9 +214,9 @@ describe('createPreTradeRisk', () => {
     });
     expect(exitOrder.allowed).toBe(true);
 
-    engine({ ...baseOrder, id: 'order-throttle-1' });
-    engine({ ...baseOrder, id: 'order-throttle-2' });
-    const throttledExit = engine({
+    engine.check({ ...baseOrder, id: 'order-throttle-1' });
+    engine.check({ ...baseOrder, id: 'order-throttle-2' });
+    const throttledExit = engine.check({
       ...baseOrder,
       id: 'exit-throttle',
       side: 'SELL',

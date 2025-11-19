@@ -139,20 +139,61 @@ export class PaperExecutionAdapter extends BaseExecutionAdapter {
     super(id, clock);
   }
 
+  /**
+   * Simulate realistic order execution with:
+   * - Roundtrip latency (jittered delay)
+   * - Price slippage for market orders
+   * - Fill price variation for limit orders
+   */
   async submit(order: OrderNew) {
     const ts = this.clock.now();
-    this.ack(order.id, ts);
+    
+    // Simulate network roundtrip to exchange (30-150ms typical for Binance)
+    const baseLatencyMs = 50;
+    const jitterMs = Math.random() * 100; // 0-100ms jitter
+    const latencyMs = baseLatencyMs + jitterMs;
+    
+    // Emit ACK after small delay
+    await delay(latencyMs * 0.3); // ACK comes back quickly
+    this.ack(order.id, this.clock.now());
+    
+    // Determine execution price with realistic slippage
     const metaRecord = order.meta as Record<string, unknown> | undefined;
     const metaPx = typeof metaRecord?.execRefPx === 'number' ? (metaRecord.execRefPx as number) : undefined;
-    const px = metaPx ?? order.px;
+    const refPrice = metaPx ?? order.px ?? 100;
+    
+    let fillPrice = refPrice;
+    
+    if (order.type === 'MKT') {
+      // Market orders: simulate slippage based on spread and urgency
+      // Typical Binance BTC spread: 0.01-0.05% (1-5 bps)
+      const spreadBps = 2 + Math.random() * 3; // 2-5 bps spread
+      const slippageBps = spreadBps * (0.5 + Math.random()); // Pay partial spread
+      const slippagePct = slippageBps / 10000;
+      
+      // BUY pays ask (higher), SELL receives bid (lower)
+      fillPrice = order.side === 'BUY' 
+        ? refPrice * (1 + slippagePct)
+        : refPrice * (1 - slippagePct);
+    } else {
+      // Limit orders: small variation around limit price (maker fills)
+      // Simulate favorable fill due to price improvement
+      const improvementBps = Math.random() * 1; // 0-1 bps improvement
+      const improvementPct = improvementBps / 10000;
+      
+      fillPrice = order.side === 'BUY'
+        ? refPrice * (1 - improvementPct) // Buy lower
+        : refPrice * (1 + improvementPct); // Sell higher
+    }
+    
+    // Wait for remaining latency before fill
+    await delay(latencyMs * 0.7);
+    
+    // Generate fill with simulated execution price
     this.fill(
       order,
-      px
-        ? {
-            px
-          }
-        : {},
-      ts
+      { px: fillPrice },
+      this.clock.now()
     );
   }
 }

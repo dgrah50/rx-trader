@@ -41,7 +41,7 @@ describe('createStrategy$', () => {
         primaryFeed: FeedType.Binance,
         extraFeeds: [],
         params: {},
-        exit: { enabled: false }
+        exit: { enabled: false, logVerbose: false }
       },
       feedManager,
       resolveStrategy: () => ({
@@ -85,7 +85,7 @@ describe('createStrategy$', () => {
         primaryFeed: FeedType.Binance,
         extraFeeds: [],
         params: {},
-        exit: { enabled: false }
+        exit: { enabled: false, logVerbose: false }
       },
       feedManager,
       onExternalFeedTick: externalTick,

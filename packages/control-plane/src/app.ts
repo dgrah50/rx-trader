@@ -169,7 +169,7 @@ const readRecentOrders = async (
 ) => {
   const events = await store.read();
   return events
-    .filter((event) => event.type.startsWith('order.'))
+    .filter((event) => event.type.startsWith('order.') || event.type === 'risk.check')
     .sort((a, b) => b.ts - a.ts)
     .slice(0, clampHistoryLimit(limit))
     .map((event) => ({ id: event.id, type: event.type, ts: event.ts, data: event.data }));
@@ -202,8 +202,10 @@ export const createControlPlaneRouter = async (
   const rebalancerTelemetryFn = accounting.rebalancer ?? (() => null);
   let killSwitch = false;
   const authToken = config.controlPlane?.authToken ?? null;
+  // Rate limiting: disabled by default for dev (max=0 disables)
+  // Set RATE_LIMIT_MAX > 0 or config.controlPlane.rateLimit.max to enable
   const rateLimitWindow = config.controlPlane?.rateLimit?.windowMs ?? 1000;
-  const rateLimitMax = config.controlPlane?.rateLimit?.max ?? 50;
+  const rateLimitMax = config.controlPlane?.rateLimit?.max ?? 0; // Disabled by default
   const rateBuckets = new Map<string, { count: number; reset: number }>();
   const dashboardRoot = config.controlPlane?.dashboard?.distDir
     ? resolve(config.controlPlane.dashboard.distDir)

@@ -17,7 +17,8 @@ const basePosition = (
   px: avgPx,
   avgPx,
   unrealized: 0,
-  realized: 0,
+  netRealized: 0,
+  grossRealized: 0,
   notional: pos * avgPx,
   pnl: 0
 });
@@ -27,6 +28,8 @@ const emptyAnalytics: PortfolioAnalytics = {
   nav: 1000,
   pnl: 0,
   realized: 0,
+  netRealized: 0,
+  grossRealized: 0,
   unrealized: 0,
   cash: 1000,
   peakNav: 1000,
@@ -56,6 +59,7 @@ describe('createExitEngine', () => {
   it('emits TP exits when sigma thresholds are met', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       tpSl: {
         enabled: true,
         tpSigma: 0.1,
@@ -96,6 +100,7 @@ describe('createExitEngine', () => {
   it('triggers time-based exits after max hold', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       time: {
         enabled: true,
         maxHoldMs: 1_000
@@ -131,6 +136,7 @@ describe('createExitEngine', () => {
   it('triggers time exits via internal poller without new ticks', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       time: {
         enabled: true,
         maxHoldMs: 120,
@@ -166,6 +172,7 @@ describe('createExitEngine', () => {
   it('responds to signal flips when configured', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       fairValue: {
         enabled: true,
         closeOnSignalFlip: true,
@@ -201,6 +208,7 @@ describe('createExitEngine', () => {
   it('emits exits when risk overrides breach exposure limits', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       riskOverrides: {
         maxSymbolExposureUsd: 500,
         action: 'FLATTEN_SYMBOL'
@@ -231,6 +239,8 @@ describe('createExitEngine', () => {
           avgPx: 100,
           markPx: 105,
           realized: 0,
+          netRealized: 0,
+          grossRealized: 0,
           unrealized: 0,
           notional: 525
         }
@@ -248,6 +258,7 @@ describe('createExitEngine', () => {
   it('fires trailing stop after arming on favorable move', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       trailing: {
         enabled: true,
         retracePct: 0.05,
@@ -284,6 +295,7 @@ describe('createExitEngine', () => {
   it('exits when price converges to fair value within epsilon', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       fairValue: {
         enabled: true,
         epsilonBps: 5,
@@ -319,6 +331,7 @@ describe('createExitEngine', () => {
   it('maps FLATTEN_ALL overrides to exits using current direction', async () => {
     const exitConfig: ExitConfig = {
       enabled: true,
+      logVerbose: false,
       riskOverrides: {
         maxGrossExposureUsd: 100,
         action: 'FLATTEN_ALL'
@@ -349,6 +362,8 @@ describe('createExitEngine', () => {
           avgPx: 100,
           markPx: 100,
           realized: 0,
+          netRealized: 0,
+          grossRealized: 0,
           unrealized: 0,
           notional: 200
         }

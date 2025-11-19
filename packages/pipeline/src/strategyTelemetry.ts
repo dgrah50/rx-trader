@@ -158,10 +158,19 @@ export const createStrategyTelemetry = (params: {
     entries.set(entry.id, entry);
   });
 
+interface StrategySignalEventData {
+  strategyId: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  strength?: number;
+  reasons?: string[];
+}
+
   // Subscribe to EventBus
   subs.push(
     params.eventBus.on('strategy.signal').subscribe((event) => {
-      const entry = entries.get(event.data.strategyId);
+      const data = event.data as StrategySignalEventData;
+      const entry = entries.get(data.strategyId);
       if (entry) {
         entry.metrics.signals += 1;
         entry.metrics.lastSignalTs = event.ts;
@@ -169,12 +178,39 @@ export const createStrategyTelemetry = (params: {
     })
   );
 
+interface StrategyIntentEventData {
+  strategyId: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  qty?: number;
+  targetSize?: number;
+  urgency?: 'low' | 'medium' | 'high';
+}
+
   subs.push(
     params.eventBus.on('strategy.intent').subscribe((event) => {
-      const entry = entries.get(event.data.strategyId);
+      const data = event.data as StrategyIntentEventData;
+      const entry = entries.get(data.strategyId);
       if (entry) {
         entry.metrics.intents += 1;
         entry.metrics.lastIntentTs = event.ts;
+      }
+    })
+  );
+
+  // Subscribe to risk.check events to count pre-trade risk rejections
+  subs.push(
+    params.eventBus.on('risk.check').subscribe((event) => {
+      const data = event.data as { orderId: string; passed: boolean; reasons?: string[]; metadata?: { strategyId?: string } };
+      const strategyId = data.metadata?.strategyId;
+      if (!strategyId) return;
+      const entry = entries.get(strategyId);
+      if (!entry) return;
+      
+      if (!data.passed) {
+        // This is a rejection from risk filter
+        entry.metrics.rejects += 1;
+        entry.metrics.lastRejectTs = event.ts;
       }
     })
   );

@@ -23,7 +23,15 @@ export const StrategyHealthCard = ({
   formatAgo
 }: StrategyHealthCardProps) => {
   const healthRows = strategies.map((strategy) => {
-    const metrics = strategy.metrics ?? {};
+    const metrics = (strategy.metrics ?? {}) as {
+      signals?: number;
+      intents?: number;
+      orders?: number;
+      fills?: number;
+      rejects?: number;
+      lastSignalTs?: number | null;
+      lastIntentTs?: number | null;
+    };
     const signalGap = (metrics.signals ?? 0) - (metrics.intents ?? 0);
     const lastSignal = metrics.lastSignalTs ?? null;
     const lastIntent = metrics.lastIntentTs ?? null;

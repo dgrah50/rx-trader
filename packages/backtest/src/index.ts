@@ -109,7 +109,7 @@ const buildEnvOverrides = (
   const strategyType = options.strategy?.type ?? StrategyType.Momentum;
   const primaryFeed = options.strategy?.primaryFeed ?? FeedType.Binance;
   const strategyParams = options.strategy?.params ?? {};
-  const strategyExit: ExitConfig = options.strategy?.exit ?? { enabled: false };
+  const strategyExit: ExitConfig = options.strategy?.exit ?? { enabled: false, logVerbose: false };
   const strategies = [
     {
       id: options.strategy?.id ?? 'backtest',

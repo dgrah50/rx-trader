@@ -121,8 +121,9 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
     positions: marks,
     nav,
     pnl: netRealized + unrealized,
-    netRealized,
-    grossRealized,
+    realized: 0,
+    netRealized: 0,
+    grossRealized: 0,
     unrealized,
     cash,
     feesPaid
