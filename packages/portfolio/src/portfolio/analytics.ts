@@ -31,7 +31,9 @@ export const portfolioAnalytics$ = (
               pos: position.pos,
               avgPx: position.avgPx,
               markPx: position.px,
-              realized: position.realized,
+              realized: position.netRealized ?? 0,
+              netRealized: position.netRealized,
+              grossRealized: position.grossRealized ?? 0,
               unrealized: position.unrealized,
               notional: position.notional
             }
@@ -44,7 +46,9 @@ export const portfolioAnalytics$ = (
             t: snapshot.t,
             nav: snapshot.nav,
             pnl: snapshot.pnl,
-            realized: snapshot.realized,
+            realized: snapshot.netRealized,
+            netRealized: snapshot.netRealized,
+            grossRealized: snapshot.grossRealized,
             unrealized: snapshot.unrealized,
             cash: snapshot.cash,
             peakNav,

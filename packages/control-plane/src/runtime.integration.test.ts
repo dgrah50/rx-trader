@@ -63,14 +63,20 @@ describe('runtime pipeline integration', () => {
             avgPx: 100,
             unrealized: 5,
             realized: 0,
-            notional: 105
+            netRealized: 0,
+            grossRealized: 0,
+            notional: 105,
+            pnl: 5
           }
         },
         nav: 105,
         pnl: 5,
         realized: 0,
+        netRealized: 0,
+        grossRealized: 0,
         unrealized: 5,
-        cash: 0
+        cash: 0,
+        feesPaid: 0
       },
       ts: Date.now()
     };

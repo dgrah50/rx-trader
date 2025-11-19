@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const exitConfigSchema = z.object({
   enabled: z.boolean().default(false),
+  logVerbose: z.boolean().default(false),
   tpSl: z
     .object({
       enabled: z.boolean().default(false),
@@ -22,7 +23,8 @@ export const exitConfigSchema = z.object({
     .object({
       enabled: z.boolean().default(false),
       maxHoldMs: z.number().positive(),
-      minHoldMs: z.number().nonnegative().optional()
+      minHoldMs: z.number().nonnegative().optional(),
+      pollIntervalMs: z.number().positive().optional()
     })
     .optional(),
   trailing: z

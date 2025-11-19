@@ -75,11 +75,13 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
     return { exitIntents$: EMPTY, stop: () => {} };
   }
 
-  const debugExits = (process.env.DEBUG_E2E ?? '').toLowerCase() === 'true';
+  const envDebug = (process.env.DEBUG_EXIT_ENGINE ?? '').toLowerCase() === 'true';
+  const verboseOpt = Boolean(options.exit.logVerbose);
   const debugLog = (...args: unknown[]) => {
-    if (debugExits) {
-      console.log('[exit-engine]', ...args);
+    if (!envDebug && !verboseOpt) {
+      return;
     }
+    console.log('[exit-engine]', ...args);
   };
 
   const exitSubject = new Subject<OrderNew>();
@@ -89,6 +91,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
     exit: options.exit
   });
   const subs: Subscription[] = [];
+  const cleanup: Array<() => void> = [];
 
   const sigmaLookbackSec = options.exit.tpSl?.sigmaLookbackSec ?? 300;
   const sigmaWindow = Math.max(10, Math.round(sigmaLookbackSec / 2));
@@ -163,7 +166,8 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
         exit: true,
         reason: decision.reason,
         strategyId: options.strategyId,
-        px: currentPrice.px
+        px: currentPrice.px,
+        execRefPx: currentPrice.px
       }
     };
     pendingExit = decision.reason;
@@ -174,7 +178,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
     if (!position || !currentPrice) return;
     const now = options.clock.now();
     const decision =
-      evaluateRisk(position, analytics, options.exit, currentPrice) ||
+      evaluateRisk(position, analytics, options.exit) ||
       evaluateTime(position, options.exit, now) ||
       evaluateFairValue(position, currentPrice, options.exit, lastSignal, now) ||
       evaluateTpSl(position, currentPrice, options.exit, sigmaEstimator.std()) ||
@@ -195,7 +199,6 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
 
   subs.push(
     options.price$.subscribe((price) => {
-      debugLog('price update', price);
       currentPrice = price;
       sigmaEstimator.update(price.px);
       updateTrailingState(trailing, position, price);
@@ -224,8 +227,33 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
     );
   }
 
+  const setupTimePoller = () => {
+    if (!options.exit.time?.enabled || !options.exit.time.maxHoldMs) return;
+    const pollMs = options.exit.time.pollIntervalMs
+      ? Math.max(100, options.exit.time.pollIntervalMs)
+      : Math.min(1_000, options.exit.time.maxHoldMs);
+    const timer = setInterval(() => {
+      debugLog('time poll tick', {
+        now: options.clock.now(),
+        position,
+        pendingExit
+      });
+      evaluate();
+    }, pollMs);
+    cleanup.push(() => clearInterval(timer));
+  };
+  setupTimePoller();
+
   const stop = () => {
     subs.forEach((sub) => sub.unsubscribe());
+    cleanup.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+        // ignore
+      }
+    });
+    cleanup.length = 0;
     exitSubject.complete();
   };
 
@@ -238,8 +266,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
 const evaluateRisk = (
   position: PositionState,
   analytics: PortfolioAnalytics | null,
-  config: ExitConfig,
-  price: PricePoint
+  config: ExitConfig
 ): Decision | null => {
   if (!config.riskOverrides) return null;
   const overrides = config.riskOverrides;

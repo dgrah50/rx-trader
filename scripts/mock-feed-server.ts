@@ -107,7 +107,7 @@ export const startMockFeedServer = (options: MockFeedServerOptions) => {
     for (const ws of connections) {
       ws.close();
     }
-    server.stop();
+    void server.stop();
   };
 
   return { stop, port: server.port };

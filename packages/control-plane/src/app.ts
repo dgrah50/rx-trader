@@ -29,6 +29,7 @@ import {
   type HyperliquidRestGatewayConfig
 } from '@rx-trader/execution';
 import { join, normalize, resolve } from 'node:path';
+import { buildTradeJournal } from './tradeJournal';
 
 const createExecutionAdapters = (config: AppConfig) => {
   const binanceConfig: BinanceRestGatewayConfig | undefined = config.venues?.binance;
@@ -63,6 +64,7 @@ type StrategyStatusSource = StrategyRuntimeStatus[] | (() => StrategyRuntimeStat
 export interface RuntimeMeta {
   live?: boolean;
   strategies?: StrategyStatusSource;
+  events?: () => DomainEvent[];
 }
 
 interface AccountingTelemetry {
@@ -87,6 +89,27 @@ const emptyStrategyMetrics = (): StrategyRuntimeStatus['metrics'] => ({
   lastFillTs: null,
   lastRejectTs: null
 });
+
+const feedToVenue = (feed?: string | null) => {
+  const lower = (feed ?? '').toLowerCase();
+  if (lower.includes('binance')) return 'binance';
+  if (lower.includes('hyperliquid')) return 'hyperliquid';
+  if (lower.includes('paper')) return 'paper';
+  return lower || 'paper';
+};
+
+const buildSymbolVenueMap = (config: AppConfig) => {
+  const map = new Map<string, string>();
+  const register = (symbol?: string, feed?: string | null) => {
+    if (!symbol) return;
+    map.set(symbol.toUpperCase(), feedToVenue(feed));
+  };
+  config.strategies.forEach((strategy) => {
+    register(strategy.tradeSymbol, strategy.primaryFeed as string);
+  });
+  return map;
+};
+
 
 const emptyExitMetrics = (): StrategyRuntimeStatus['exits'] => ({
   total: 0,
@@ -172,6 +195,7 @@ export const createControlPlaneRouter = async (
   const logger = options.logger ?? createLogger('gateway');
   const metrics: Metrics = options.metrics ?? createMetrics();
   const store = options.store ?? (await createEventStore(config, metrics));
+  const symbolVenues = buildSymbolVenueMap(config);
   const runtimeMeta = options.runtimeMeta ?? {};
   const accounting = options.accounting ?? {};
   const balanceTelemetryFn = accounting.balanceTelemetry ?? (() => null);
@@ -316,6 +340,20 @@ const handleCorsPreflight = (request: Request) => {
     return json(state.positions);
   };
 
+  const handleTrades = async () => {
+    const events = await store.read();
+    const positionsState = await buildProjection(store, positionsProjection);
+    const { open, closed } = buildTradeJournal(events, positionsState.positions ?? {});
+    const annotate = <T extends { symbol: string }>(trade: T) => ({
+      ...trade,
+      venue: symbolVenues.get(trade.symbol.toUpperCase()) ?? 'paper'
+    });
+    return json({
+      open: open.map(annotate),
+      closed: closed.map(annotate)
+    });
+  };
+
   const readPnlSnapshot = async () => {
     const state = await buildProjection(store, pnlProjection);
     return state.latest ?? null;
@@ -351,7 +389,9 @@ const handleCorsPreflight = (request: Request) => {
     return json({
       timestamp: Date.now(),
       nav: pnlSnapshot?.nav ?? null,
-      realized: pnlSnapshot?.realized ?? null,
+      realized: pnlSnapshot?.netRealized ?? null,
+      netRealized: pnlSnapshot?.netRealized ?? null,
+      grossRealized: pnlSnapshot?.grossRealized ?? null,
       unrealized: pnlSnapshot?.unrealized ?? null,
       balances: balancesState.balances,
       margin: marginState.summaries,
@@ -420,7 +460,9 @@ const handleCorsPreflight = (request: Request) => {
       feeds,
       metrics: {
         nav: pnlSnapshot?.nav ?? null,
-        realized: pnlSnapshot?.realized ?? null,
+        realized: pnlSnapshot?.netRealized ?? null,
+        netRealized: pnlSnapshot?.netRealized ?? null,
+        grossRealized: pnlSnapshot?.grossRealized ?? null,
         unrealized: pnlSnapshot?.unrealized ?? null,
         feesPaid: pnlSnapshot?.feesPaid ?? null,
         eventSubscribers: subscribers.size,
@@ -557,6 +599,9 @@ const handleCorsPreflight = (request: Request) => {
     if (url.pathname === '/positions' && request.method === 'GET') {
       return handlePositions();
     }
+    if (url.pathname === '/trades' && request.method === 'GET') {
+      return handleTrades();
+    }
     if (url.pathname === '/pnl' && request.method === 'GET') {
       return handlePnl();
     }
@@ -625,6 +670,16 @@ const handleCorsPreflight = (request: Request) => {
     }
     if (url.pathname === '/events/recent' && request.method === 'GET') {
       const limit = clampHistoryLimit(Number(url.searchParams.get('limit') ?? '20'));
+      if (runtimeMeta.events) {
+        const events = runtimeMeta.events();
+        // RingBuffer returns oldest-first or newest-first?
+        // Usually RingBuffer.getRecent returns newest-first or we need to sort.
+        // Assuming getRecent(N) returns N most recent events.
+        // If it returns all, we slice.
+        // Let's assume it returns an array of events.
+        // We should sort them by ts desc just in case.
+        return json(events.sort((a, b) => b.ts - a.ts).slice(0, limit));
+      }
       const recentEvents = await readRecentEvents(store, limit);
       return json(recentEvents);
     }

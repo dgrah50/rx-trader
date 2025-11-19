@@ -38,7 +38,8 @@
       "@rx-trader/backtest": ["packages/backtest/src/index.ts"],
       "@rx-trader/backtest/*": ["packages/backtest/src/*"],
       "@rx-trader/market-structure": ["packages/market-structure/src/index.ts"],
-      "@rx-trader/market-structure/*": ["packages/market-structure/src/*"]
+      "@rx-trader/market-structure/*": ["packages/market-structure/src/*"],
+      "@/*": ["packages/dashboard/src/*"]
     }
   }
 }

@@ -43,7 +43,8 @@ describe('portfolio$', () => {
     const last = snapshots.at(-1);
     expect(last?.positions.SIM.pos).toBe(1);
     expect(last?.cash).toBeCloseTo(-90); // -200 buy +110 sell
-    expect(last?.realized).toBeCloseTo(10);
+    expect(last?.netRealized).toBeCloseTo(10);
+    expect(last?.grossRealized).toBeCloseTo(10);
     expect(last?.unrealized).toBeCloseTo(10);
     expect(last?.pnl).toBeCloseTo(20); // realized 10 + unrealized 10 (mark from latest fill)
     expect(last?.nav).toBeCloseTo(20); // cash + mark value
@@ -71,7 +72,8 @@ describe('portfolio$', () => {
     expect(last.positions.SIM.pos).toBe(1);
     expect(last.cash).toBeCloseTo(-96); // -200 +105 -1 fee
     // Realized: (105-100)*1 - fee = 4; Unrealized: (95-100)*1 = -5 => total -1
-    expect(last.realized).toBeCloseTo(4);
+    expect(last.netRealized).toBeCloseTo(4);
+    expect(last.grossRealized).toBeCloseTo(5);
     expect(last.unrealized).toBeCloseTo(-5);
     expect(last.pnl).toBeCloseTo(-1);
     expect(last.feesPaid).toBeCloseTo(1);
@@ -95,6 +97,8 @@ describe('portfolio$', () => {
     const last = snapshots.at(-1)!;
     expect(last.cash).toBeCloseTo(-102);
     expect(last.positions.SIM.pos).toBe(1);
+    expect(last.netRealized).toBeCloseTo(-2);
+    expect(last.grossRealized).toBeCloseTo(0);
     expect(last.nav).toBeCloseTo(-2); // 100 notional - 102 cash
     expect(last.feesPaid).toBeCloseTo(2);
   });
@@ -117,7 +121,8 @@ describe('portfolio$', () => {
     const last = snapshots.at(-1)!;
     expect(last.positions.SIM.pos).toBe(-1);
     expect(last.cash).toBeCloseTo(120);
-    expect(last.realized).toBeCloseTo(0);
+    expect(last.netRealized).toBeCloseTo(0);
+    expect(last.grossRealized).toBeCloseTo(0);
     expect(last.unrealized).toBeCloseTo(10);
     expect(last.pnl).toBeCloseTo(10); // short profit
     expect(last.nav).toBeCloseTo(10);

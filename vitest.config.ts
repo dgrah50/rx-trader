@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 
-const runE2E = process.env.RUN_E2E_TESTS === 'true';
+const runE2E = process.env.RUN_E2E_TESTS !== 'false';
 
 export default defineConfig({
   test: {

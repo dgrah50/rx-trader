@@ -8,25 +8,20 @@ interface PnlTimelineCardProps {
 }
 
 export const PnlTimelineCard = ({ history }: PnlTimelineCardProps) => (
-  <Card className="lg:col-span-2">
-    <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <CardDescription>Portfolio</CardDescription>
-        <CardTitle className="text-2xl font-semibold">PnL Timeline</CardTitle>
+  <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+    <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">PnL History</span>
       </div>
-      <div className="flex gap-2 text-xs text-muted-foreground">
+      <div className="flex gap-2 text-[10px] text-muted-foreground">
         <div className="flex items-center gap-1">
-          <Zap className="h-3.5 w-3.5 text-emerald-400" />
-          <span>{formatNumber(history.at(-1)?.value ?? null)} latest</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <Signal className="h-3.5 w-3.5 text-indigo-400" />
-          <span>{history.length} samples</span>
+          <Zap className="h-3 w-3 text-emerald-400" />
+          <span className="font-mono">{formatNumber(history.at(-1)?.value ?? null)}</span>
         </div>
       </div>
-    </CardHeader>
-    <CardContent>
+    </div>
+    <div className="flex-1 min-h-0 -mx-1">
       <PnlChart points={history} />
-    </CardContent>
+    </div>
   </Card>
 );

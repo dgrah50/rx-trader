@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { firstValueFrom, take, timeout } from 'rxjs';
 import { BinanceFeedAdapter } from './binance';
 
-const runReal = process.env.RUN_REAL_FEED_TESTS === 'true';
+const runReal = process.env.RUN_REAL_FEED_TESTS !== 'false';
 
 const maybe = runReal ? describe : describe.skip;
 

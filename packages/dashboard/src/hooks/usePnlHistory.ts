@@ -7,7 +7,8 @@ export const usePnlHistory = (pnl: PnlResponse | null) => {
 
   useEffect(() => {
     if (!pnl) return;
-    const total = (pnl as any)?.pnl ?? (pnl.realized ?? 0) + (pnl.unrealized ?? 0);
+    const total =
+      (pnl as any)?.pnl ?? (pnl.netRealized ?? pnl.realized ?? 0) + (pnl.unrealized ?? 0);
     setHistory((prev) => {
       const next = [...prev, { t: Date.now(), value: total }];
       return next.slice(-1200);

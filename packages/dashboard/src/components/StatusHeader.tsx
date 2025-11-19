@@ -1,4 +1,5 @@
 import { AlertTriangle, BarChart3, Link2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -66,55 +67,74 @@ export const StatusHeader = ({
 }: StatusHeaderProps) => {
   const formatCurrency = (value: number) => `$${formatNumber(value, value >= 1000 ? 0 : 2)}`;
   return (
-    <Card className="border-primary/30">
-      <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-2">
-          <CardDescription>Status</CardDescription>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <StatusBadge label={modeLabel} intent={modeIntent} />
-            <FeedStatusTooltip feeds={feeds}>
-              <StatusBadge
-                label={`Feeds ${feedSummary.connected}/${feedSummary.total}`}
-                intent={feedSummary.connected ? 'ok' : 'warn'}
-              />
-            </FeedStatusTooltip>
-            {marginSnapshot ? (
-              <StatusBadge
-                label={`Initial margin ${formatCurrency(marginSnapshot.used)} used / ${formatCurrency(marginSnapshot.available)} free`}
-                intent={marginSnapshot.available > 0 ? 'ok' : 'warn'}
-              />
-            ) : null}
-            <span className="text-xs text-muted-foreground">
-              Last event {formatAgo(lastEventTs)} · Last log {formatAgo(lastLogTs)}
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between w-full">
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <div className="flex items-center gap-2">
+          <span className={cn("font-bold uppercase tracking-wider", modeIntent === 'ok' ? 'text-emerald-500' : 'text-amber-500')}>
+            {modeLabel}
+          </span>
+          <div className="h-3 w-px bg-border" />
+        </div>
+        
+        <FeedStatusTooltip feeds={feeds}>
+          <div className="flex items-center gap-1.5 cursor-help hover:text-foreground transition-colors text-muted-foreground">
+            <div className={cn("h-1.5 w-1.5 rounded-full", feedSummary.connected === feedSummary.total ? "bg-emerald-500" : "bg-amber-500")} />
+            <span>Feeds {feedSummary.connected}/{feedSummary.total}</span>
+          </div>
+        </FeedStatusTooltip>
+
+        {marginSnapshot && (
+          <>
+            <div className="h-3 w-px bg-border" />
+            <span className="text-muted-foreground">
+              Margin: <span className="text-foreground font-mono">{formatCurrency(marginSnapshot.used)}</span> used <span className="text-muted-foreground">/</span> <span className="text-foreground font-mono">{formatCurrency(marginSnapshot.available)}</span> free
             </span>
-            {killSwitch && <StatusBadge label="Kill switch" intent="error" />}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1">
+          </>
+        )}
+
+        <div className="h-3 w-px bg-border" />
+        <span className="text-muted-foreground">
+          Event: <span className="text-foreground font-mono">{formatAgo(lastEventTs)}</span>
+        </span>
+        <span className="text-muted-foreground">
+          Log: <span className="text-foreground font-mono">{formatAgo(lastLogTs)}</span>
+        </span>
+
+        {killSwitch && (
+          <Badge variant="destructive" className="h-5 text-[10px] px-1.5 uppercase">
+            Kill Switch Active
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex items-center gap-4 text-xs">
+        {showWarning && (
+          <span className="flex items-center gap-1.5 text-amber-500 font-medium animate-pulse">
+            <AlertTriangle className="h-3 w-3" /> Reconnecting...
+          </span>
+        )}
+        
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <div className="flex items-center gap-1.5" title="Event Stream">
             <ConnectionDot status={eventStreamStatus} />
-            <span>Events stream</span>
+            <span className="hidden sm:inline">Events</span>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5" title="Log Stream">
             <ConnectionDot status={logStreamStatus} />
-            <span>Logs stream</span>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={onOpenControl}>
-              <Link2 className="mr-1 h-3.5 w-3.5" /> Control Plane
-            </Button>
-            <Button variant="outline" size="sm" onClick={onOpenMetrics}>
-              <BarChart3 className="mr-1 h-3.5 w-3.5" /> Metrics
-            </Button>
+            <span className="hidden sm:inline">Logs</span>
           </div>
         </div>
-      </CardHeader>
-      {showWarning && (
-        <CardContent className="flex items-center gap-2 text-sm text-amber-500">
-          <AlertTriangle className="h-4 w-4" /> Live stream degraded — attempting to reconnect.
-        </CardContent>
-      )}
-    </Card>
+
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={onOpenControl}>
+            <Link2 className="mr-1.5 h-3 w-3" /> Control
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={onOpenMetrics}>
+            <BarChart3 className="mr-1.5 h-3 w-3" /> Metrics
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 };
 

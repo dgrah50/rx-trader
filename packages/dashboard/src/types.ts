@@ -58,12 +58,53 @@ export const createEmptyStrategyMetrics = (): StrategyMetrics => ({
 export interface PnlResponse {
   nav: number;
   realized: number;
+  netRealized: number;
+  grossRealized: number;
   unrealized: number;
   feesPaid: number;
 }
 
+export interface PositionSnapshot {
+  pos: number;
+  avgPx: number;
+  px: number;
+  pnl?: number;
+  realized?: number;
+  unrealized?: number;
+  netRealized?: number;
+  grossRealized?: number;
+}
+
 export interface PositionsResponse {
-  [symbol: string]: { pos: number; avgPx: number; px: number; pnl: number };
+  [symbol: string]: PositionSnapshot;
+}
+
+export type TradeDirection = 'LONG' | 'SHORT';
+
+export interface TradeSummary {
+  symbol: string;
+  venue?: string;
+  qty: number;
+  direction: TradeDirection;
+  entryPx: number;
+  entryTs: number;
+  fees: number;
+}
+
+export interface OpenTrade extends TradeSummary {
+  markPx: number;
+  unrealizedPnl: number;
+}
+
+export interface ClosedTrade extends TradeSummary {
+  exitPx: number;
+  exitTs: number;
+  realizedPnl: number;
+}
+
+export interface TradesResponse {
+  open: OpenTrade[];
+  closed: ClosedTrade[];
 }
 
 export interface LogEntry {
@@ -169,6 +210,8 @@ export interface StatusResponse {
   metrics: {
     nav: number | null;
     realized: number | null;
+    netRealized: number | null;
+    grossRealized: number | null;
     unrealized: number | null;
     feesPaid: number | null;
     eventSubscribers: number;
@@ -186,6 +229,7 @@ export interface EventMessage {
   type: string;
   ts: number;
   data?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface OrderEvent {

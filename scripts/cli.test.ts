@@ -155,7 +155,10 @@ describe('CLI smoke tests', () => {
 
     const store = await createEventStore(loadConfig());
     const events = await store.read();
-    (store as unknown as { close?: () => Promise<void> | void }).close?.();
+    const maybeClose = (store as { close?: () => Promise<void> | void }).close;
+    if (typeof maybeClose === 'function') {
+      await maybeClose.call(store);
+    }
     const balanceEvent = events.find((event) => event.type === 'account.balance.adjusted');
     expect(balanceEvent).toBeTruthy();
     expect((balanceEvent as any).data.accountId).toBe('TEST');

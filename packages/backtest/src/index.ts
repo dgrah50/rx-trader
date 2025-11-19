@@ -7,7 +7,7 @@ import { performance } from 'node:perf_hooks';
 import type { MarketTick, DomainEvent } from '@rx-trader/core/domain';
 import { StrategyType, FeedType } from '@rx-trader/core/constants';
 import { startEngine, type EngineDependencies } from '@rx-trader/control-plane';
-import type { EnvOverrides } from '@rx-trader/config';
+import type { EnvOverrides, ExitConfig } from '@rx-trader/config';
 import {
   InMemoryEventStore,
   buildProjection,
@@ -25,6 +25,9 @@ interface StrategyOverrides {
   type?: StrategyType;
   params?: Record<string, unknown>;
   primaryFeed?: FeedType;
+  extraFeeds?: FeedType[];
+  id?: string;
+  exit?: ExitConfig;
 }
 
 interface RiskOverrides {
@@ -105,7 +108,19 @@ const buildEnvOverrides = (
 ): EnvOverrides => {
   const strategyType = options.strategy?.type ?? StrategyType.Momentum;
   const primaryFeed = options.strategy?.primaryFeed ?? FeedType.Binance;
-  const strategyParams = JSON.stringify(options.strategy?.params ?? {});
+  const strategyParams = options.strategy?.params ?? {};
+  const strategyExit: ExitConfig = options.strategy?.exit ?? { enabled: false };
+  const strategies = [
+    {
+      id: options.strategy?.id ?? 'backtest',
+      type: strategyType,
+      tradeSymbol: symbol,
+      primaryFeed,
+      extraFeeds: options.strategy?.extraFeeds ?? [],
+      params: strategyParams,
+      exit: strategyExit
+    }
+  ];
   const maxPosition = options.risk?.maxPosition ?? 10;
   const notional = options.risk?.notional ?? 1_000_000;
   const intentMode = options.execution?.mode ?? 'market';
@@ -115,11 +130,7 @@ const buildEnvOverrides = (
   return {
     EVENT_STORE_DRIVER: 'memory',
     ACCOUNT_ID: 'BACKTEST',
-    STRATEGY_TRADE_SYMBOL: symbol,
-    STRATEGY_TYPE: strategyType,
-    STRATEGY_PRIMARY_FEED: primaryFeed,
-    STRATEGY_EXTRA_FEEDS: '',
-    STRATEGY_PARAMS: strategyParams,
+    STRATEGIES: JSON.stringify(strategies),
     RISK_MAX_POSITION: String(maxPosition),
     RISK_NOTIONAL_LIMIT: String(notional),
     RISK_PRICE_BAND_MIN: '0',
@@ -159,7 +170,10 @@ const createFeedManagerStub = (adapter: HistoricalFeedAdapter) => ({
       stream: adapter.feed$,
       adapter
     }
-  ]
+  ],
+  stop: () => {
+    adapter.disconnect?.();
+  }
 });
 
 export const runBacktest = async (options: EngineBacktestOptions): Promise<EngineBacktestResult> => {

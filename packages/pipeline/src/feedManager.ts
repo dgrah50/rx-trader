@@ -34,8 +34,7 @@ const deriveHyperliquidCoin = (symbol: string) => {
   return upper;
 };
 
-export const createFeedAdapter = (kind: FeedType, symbol: string, index = 0): FeedAdapter => {
-  const idSuffix = index ? `-${index}` : '';
+export const createFeedAdapter = (kind: FeedType, symbol: string, _index = 0): FeedAdapter => {
   switch (kind) {
     case FeedType.Binance:
       return new BinanceFeedAdapter({ symbol });

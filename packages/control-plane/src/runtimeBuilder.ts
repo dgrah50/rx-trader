@@ -28,6 +28,7 @@ import type { AccountExposureGuard } from '@rx-trader/risk/preTrade';
 import { merge, Subject } from 'rxjs';
 import { share } from 'rxjs/operators';
 import type { OrderNew } from '@rx-trader/core/domain';
+import { EventBus } from '@rx-trader/core';
 
 const feedTypeToExchange = (feed: FeedType): string | null => {
   switch (feed) {
@@ -59,6 +60,7 @@ export interface RuntimeBuilderResult {
   accountGuard?: AccountExposureGuard;
   marginGuard?: ReturnType<typeof createMarketExposureGuard>;
   exitIntentSink: Subject<OrderNew>;
+  eventBus: EventBus;
 }
 
 export interface RuntimeDependencies {
@@ -81,6 +83,7 @@ export const buildRuntime = async (
   const boundClock: Clock = { now: clock.now.bind(clock) };
   const logger = createLogger('trader', undefined, clock);
   const metrics = createMetrics();
+  const eventBus = new EventBus();
   const eventStoreFactory = deps.createEventStore ?? createEventStore;
   const store = await eventStoreFactory(config, metrics);
 
@@ -174,6 +177,7 @@ export const buildRuntime = async (
     executionAccount: config.execution.account,
     executionPolicy: config.execution.policy as any,
     baseRisk: risk,
+    eventBus,
     clock: boundClock,
     accountGuard,
     createFeedManager: feedManagerFactory,
@@ -243,7 +247,8 @@ export const buildRuntime = async (
     strategyRuntimes: orchestrator.runtimes,
     accountGuard,
     marginGuard: primaryMargin.mode === 'cash' ? undefined : marketGuard,
-    exitIntentSink
+    exitIntentSink,
+    eventBus
   };
 };
 

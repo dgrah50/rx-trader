@@ -1,51 +1,51 @@
 import { describe, it, expect } from 'vitest';
-import { Subject } from 'rxjs';
-import type { StrategyRuntime } from './strategyScheduler';
 import { createStrategyTelemetry } from './strategyTelemetry';
 import { FeedType, StrategyType } from '@rx-trader/core/constants';
+import { EventBus } from '@rx-trader/core';
+import type { StrategyDefinition } from '@rx-trader/config';
 
-const createRuntime = (id: string): {
-  runtime: StrategyRuntime;
-  signal$: Subject<any>;
-  intent$: Subject<any>;
-} => {
-  const signal$ = new Subject<any>();
-  const intent$ = new Subject<any>();
-  const runtime: StrategyRuntime = {
-    definition: {
-      id,
-      type: StrategyType.Momentum,
-      tradeSymbol: 'BTCUSDT',
-      primaryFeed: FeedType.Binance,
-      extraFeeds: [],
-      params: {},
-      mode: 'live',
-      priority: 0,
-      budget: {}
-    },
-    mode: 'live',
-    priority: 0,
-    feedManager: {
-      marks$: new Subject<any>(),
-      sources: []
-    },
-    signals$: signal$,
-    intents$: intent$,
-    fees: { makerBps: 8, takerBps: 10, source: 'test' }
-  };
-  return { runtime, signal$, intent$ };
-};
+const createDefinition = (id: string): StrategyDefinition => ({
+  id,
+  type: StrategyType.Momentum,
+  tradeSymbol: 'BTCUSDT',
+  primaryFeed: FeedType.Binance,
+  extraFeeds: [],
+  params: {},
+  mode: 'live',
+  priority: 0,
+  budget: {},
+  exit: { enabled: false }
+});
 
 describe('createStrategyTelemetry', () => {
   it('tracks strategy metrics across signals, intents, orders, fills, and rejects', () => {
-    const { runtime, signal$, intent$ } = createRuntime('strat-A');
-    const telemetry = createStrategyTelemetry({ runtimes: [runtime] });
+    const definition = createDefinition('strat-A');
+    const eventBus = new EventBus();
+    const telemetry = createStrategyTelemetry({ strategies: [definition], eventBus });
 
-    signal$.next({}); // first signal
-    signal$.next({}); // second signal
-    intent$.next({}); // intent after budget
+    // Emit signals and intents via EventBus
+    eventBus.emit({
+      id: 'sig-1',
+      type: 'strategy.signal',
+      data: { strategyId: 'strat-A', symbol: 'BTCUSDT', side: 'BUY', strength: 1 },
+      ts: Date.now()
+    });
+    eventBus.emit({
+      id: 'sig-2',
+      type: 'strategy.signal',
+      data: { strategyId: 'strat-A', symbol: 'BTCUSDT', side: 'BUY', strength: 1 },
+      ts: Date.now()
+    });
+    eventBus.emit({
+      id: 'int-1',
+      type: 'strategy.intent',
+      data: { strategyId: 'strat-A', symbol: 'BTCUSDT', side: 'BUY', qty: 1 },
+      ts: Date.now()
+    });
 
     const orderId = 'order-1';
+    // Use recordOrder which now emits to bus (or emit directly to bus to test decoupling)
+    // Let's use recordOrder to verify backward compat/convenience, but also verify bus listening.
     telemetry.recordOrder({
       id: orderId,
       t: Date.now(),
@@ -91,12 +91,12 @@ describe('createStrategyTelemetry', () => {
     expect(metrics.orders).toBe(2);
     expect(metrics.fills).toBe(1);
     expect(metrics.rejects).toBe(1);
-    expect(snapshotEntry.fees).toEqual({ makerBps: 8, takerBps: 10, source: 'test' });
   });
 
   it('uses symbol fallbacks when strategy metadata is missing', () => {
-    const { runtime } = createRuntime('strat-B');
-    const telemetry = createStrategyTelemetry({ runtimes: [runtime] });
+    const definition = createDefinition('strat-B');
+    const eventBus = new EventBus();
+    const telemetry = createStrategyTelemetry({ strategies: [definition], eventBus });
 
     telemetry.recordRiskReject({
       id: 'order-x',
@@ -114,8 +114,9 @@ describe('createStrategyTelemetry', () => {
   });
 
   it('records exit counts and reasons per strategy', () => {
-    const { runtime } = createRuntime('strat-exit');
-    const telemetry = createStrategyTelemetry({ runtimes: [runtime] });
+    const definition = createDefinition('strat-exit');
+    const eventBus = new EventBus();
+    const telemetry = createStrategyTelemetry({ strategies: [definition], eventBus });
 
     telemetry.recordExit('strat-exit', 'EXIT_TIME');
     telemetry.recordExit('strat-exit', 'EXIT_TIME');

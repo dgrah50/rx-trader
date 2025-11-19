@@ -1,9 +1,4 @@
-import type {
-  DomainEvent,
-  PortfolioAnalytics,
-  BalanceEntry,
-  MarginSummary
-} from '@rx-trader/core/domain';
+import type { DomainEvent, PortfolioAnalytics, BalanceEntry, MarginSummary } from '@rx-trader/core/domain';
 import type { EventStore } from './eventStore';
 
 interface Projection<TState> {
@@ -34,8 +29,22 @@ export const ordersView: Projection<Record<string, DomainEvent>> = {
   }
 };
 
+type PositionMarkShape = {
+  symbol?: string;
+  pos?: number;
+  avgPx?: number;
+  px?: number;
+  t?: number;
+  realized?: number;
+  netRealized?: number;
+  grossRealized?: number;
+  unrealized?: number;
+  notional?: number;
+  pnl?: number;
+};
+
 interface PositionState {
-  positions: Record<string, { pos: number; avgPx: number; px: number; pnl?: number }>;
+  positions: Record<string, PositionMarkShape>;
   t?: number;
 }
 
@@ -45,7 +54,28 @@ export const positionsProjection: Projection<PositionState> = {
   reduce: (state, event) => {
     if (event.type === 'portfolio.snapshot') {
       const data = event.data as any;
-      state.positions = data.positions ?? {};
+      const positions = (data.positions ?? {}) as Record<string, PositionMarkShape>;
+      state.positions = Object.fromEntries(
+        Object.entries(positions).map(([symbol, position]) => {
+          const netRealized = position.netRealized ?? 0;
+          const grossRealized = position.grossRealized ?? 0;
+          const unrealized = position.unrealized ?? 0;
+          const pnl =
+            typeof position.pnl === 'number' && Number.isFinite(position.pnl)
+              ? position.pnl
+              : netRealized + unrealized;
+          return [
+            symbol,
+            {
+              ...position,
+              realized: netRealized,
+              netRealized,
+              grossRealized,
+              pnl
+            }
+          ];
+        })
+      );
       state.t = data.t;
     }
     return state;

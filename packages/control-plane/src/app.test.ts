@@ -42,6 +42,22 @@ describe('gateway integration', () => {
 
     await store.append({
       id: crypto.randomUUID(),
+      type: 'order.fill',
+      ts: Date.now(),
+      data: {
+        id: crypto.randomUUID(),
+        orderId: orderPayload.id,
+        t: Date.now(),
+        symbol: 'SIM',
+        px: 101,
+        qty: 1,
+        side: 'BUY',
+        fee: 0.1
+      }
+    });
+
+    await store.append({
+      id: crypto.randomUUID(),
       type: 'portfolio.snapshot',
       ts: Date.now(),
       data: {
@@ -55,20 +71,31 @@ describe('gateway integration', () => {
             avgPx: 100,
             unrealized: 1,
             realized: 0,
-            notional: 101
+            netRealized: 0,
+            grossRealized: 0,
+            notional: 101,
+            pnl: 1
           }
         },
         nav: 101,
         pnl: 1,
+        netRealized: 0,
+        grossRealized: 0,
         realized: 0,
         unrealized: 1,
-        cash: 0
+        cash: 0,
+        feesPaid: 0
       }
     });
 
     const positionsRes = await router(get('/positions'));
     const positions = await positionsRes.json();
     expect(positions.SIM).toBeDefined();
+
+    const tradesRes = await router(get('/trades'));
+    expect(tradesRes.status).toBe(200);
+    const trades = await tradesRes.json();
+    expect(Array.isArray(trades.open)).toBe(true);
   });
 
   it('streams domain events over SSE', async () => {
@@ -130,6 +157,8 @@ describe('gateway integration', () => {
         nav: 12_345,
         pnl: 123,
         realized: 100,
+        netRealized: 100,
+        grossRealized: 100,
         unrealized: 23,
         cash: 11_000,
         peakNav: 13_000,
@@ -142,6 +171,8 @@ describe('gateway integration', () => {
             avgPx: 60_000,
             markPx: 61_000,
             realized: 50,
+            netRealized: 50,
+            grossRealized: 50,
             unrealized: 100,
             notional: 6_100
           }

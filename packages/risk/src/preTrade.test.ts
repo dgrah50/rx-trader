@@ -194,6 +194,37 @@ describe('createPreTradeRisk', () => {
     expect(decision.allowed).toBe(false);
     expect(decision.reasons).toContain('insufficient-quote');
   });
+
+  it('bypasses throttle limits for exit orders and ignores collateral checks', () => {
+    const clock = createManualClock(0);
+    const guard: AccountExposureGuard = {
+      venue: 'paper',
+      baseAsset: 'SIM',
+      quoteAsset: 'USD',
+      getAvailable: () => 0
+    };
+    const engine = createPreTradeRisk(limits, clock.now, guard);
+    engine(baseOrder);
+    const exitOrder = engine({
+      ...baseOrder,
+      id: 'exit-1',
+      side: 'SELL',
+      qty: baseOrder.qty,
+      meta: { exit: true }
+    });
+    expect(exitOrder.allowed).toBe(true);
+
+    engine({ ...baseOrder, id: 'order-throttle-1' });
+    engine({ ...baseOrder, id: 'order-throttle-2' });
+    const throttledExit = engine({
+      ...baseOrder,
+      id: 'exit-throttle',
+      side: 'SELL',
+      qty: 1,
+      meta: { exit: true }
+    });
+    expect(throttledExit.allowed).toBe(true);
+  });
 });
 
 describe('splitRiskStream', () => {

@@ -84,8 +84,38 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     strategyRuntimes,
     accountGuard,
     marginGuard,
-    exitIntentSink
+    exitIntentSink,
+    eventBus // Destructure EventBus
   } = await buildRuntime({ ...options, clock }, options.dependencies);
+
+  // Instantiate RingBuffer for high-frequency event storage (hot store)
+  const { RingBuffer } = await import('@rx-trader/core'); // Dynamic import or add to top-level imports
+  const ringBuffer = new RingBuffer(1000);
+
+  // Wire EventBus to RingBuffer (All events go to RingBuffer)
+  eventBus.onAll().subscribe((event) => {
+    ringBuffer.push(event);
+  });
+
+  // Wire EventBus to Persistence (Transactional events go to SQLite)
+  const PERSISTED_EVENTS = new Set([
+    'order.new',
+    'order.fill',
+    'order.reject',
+    'order.cancel',
+    'order.ack',
+    'portfolio.snapshot',
+    'pnl.analytics',
+    'account.balance.adjusted',
+    'account.transfer',
+    'risk.check'
+  ]);
+
+  eventBus.onAll().subscribe((event) => {
+    if (PERSISTED_EVENTS.has(event.type)) {
+      persistence.enqueue(event);
+    }
+  });
 
   const auditEnabled = Boolean(
     process.env.AUDIT_LOG_PATH ||
@@ -209,14 +239,31 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   });
 
   const strategyTelemetry = createStrategyTelemetry({
-    runtimes: strategyRuntimes,
+    strategies: strategyRuntimes.map(r => r.definition),
+    eventBus,
     clock
   });
 
   rejected$.subscribe((decision) => {
     metrics.riskRejected.inc();
     logger.warn({ reasons: decision.reasons }, 'Order rejected');
-    strategyTelemetry.recordRiskReject(decision.order, decision.reasons);
+    
+    // Emit rejection to EventBus (Telemetry and Persistence will pick it up)
+    eventBus.emit({
+      id: crypto.randomUUID(),
+      type: 'order.reject',
+      data: {
+        id: decision.order.id,
+        t: clock.now(),
+        reason: decision.reasons?.join(', ') ?? 'risk-check-failed',
+      },
+      ts: clock.now(),
+      metadata: {
+        reasons: decision.reasons,
+        risk: true
+      }
+    });
+
     logAudit('risk-rejected', {
       orderId: decision.order.id,
       symbol: decision.order.symbol,
@@ -242,7 +289,15 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       quoteReserve: describeQuoteReserve()
     });
     logger.info({ fill }, 'Fill event');
-    strategyTelemetry.recordFill(fill);
+    
+    // Emit fill to EventBus
+    eventBus.emit({
+        id: crypto.randomUUID(),
+        type: 'order.fill',
+        data: fill,
+        ts: clock.now()
+    });
+
     if (fill.fee && fill.fee > 0) {
       accountGuard?.consume?.(fill.orderId, fill.fee);
       logAudit('quote-reserve', {
@@ -254,7 +309,14 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   });
 
   execution.rejects$.subscribe((reject) => {
-    strategyTelemetry.recordExecutionReject(reject);
+    // Emit execution reject to EventBus
+    eventBus.emit({
+        id: crypto.randomUUID(),
+        type: 'order.reject',
+        data: reject,
+        ts: clock.now()
+    });
+
     accountGuard?.release?.(reject.id);
     logAudit('execution-reject', {
       orderId: reject.id,
@@ -271,7 +333,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     venue: instrument.venue ?? execution.adapter.id,
     accountId: config.execution.account,
     clock,
-    enqueue: persistence.enqueue
+    enqueue: (event) => eventBus.emit(event) // Route through EventBus
   });
 
   const balanceProviderFactory = options.dependencies?.createBalanceProvider ?? createBalanceProvider;
@@ -289,8 +351,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     accountId: config.execution.account,
     provider: balanceProvider,
     getBalance: (venue, asset) => accountState.getBalance(venue, asset),
-    enqueue: persistence.enqueue,
-    enqueueSnapshot: persistence.enqueue,
+    enqueue: (event) => eventBus.emit(event), // Route through EventBus
+    enqueueSnapshot: (event) => eventBus.emit(event), // Route through EventBus
     clock,
     intervalMs: config.accounting?.balanceSyncIntervalMs,
     driftBpsThreshold: driftThreshold,
@@ -318,14 +380,14 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     logger,
     metrics,
     accountId: config.execution.account,
-    enqueue: persistence.enqueue
+    enqueue: (event) => eventBus.emit(event) // Route through EventBus
   });
   await rebalancer.start();
 
   const transferExecutor = new TransferExecutionService({
     enabled: config.rebalancer.executor.auto,
     store,
-    enqueue: persistence.enqueue,
+    enqueue: (event) => eventBus.emit(event), // Route through EventBus
     providers: createTransferProviders({
       mode: config.rebalancer.executor.mode,
       live,
@@ -370,13 +432,15 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
         quoteReserve: describeQuoteReserve()
       });
     }
-    strategyTelemetry.recordOrder(decision.order);
-    persistence.enqueue({
+    
+    // Emit order.new to EventBus
+    eventBus.emit({
       id: crypto.randomUUID(),
       type: 'order.new',
       data: decision.order,
       ts: clock.now()
     });
+
     logAudit('order-new', {
       orderId: decision.order.id,
       symbol: decision.order.symbol,
@@ -409,7 +473,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       if (error instanceof ExecutionCircuitOpenError) {
         const reason = `circuit-open:${execution.adapter.id}`;
         logger.error({ orderId: decision.order.id, reason }, 'Execution blocked by circuit');
-        persistence.enqueue({
+        
+        eventBus.emit({
           id: crypto.randomUUID(),
           type: 'order.reject',
           data: {
@@ -419,6 +484,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
           },
           ts: clock.now()
         });
+
       } else {
         logger.error({ error: error instanceof Error ? error.message : error }, 'Execution submit error');
       }
@@ -499,7 +565,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   const persistThrottleMs = Number(process.env.PERSIST_THROTTLE_MS ?? '250');
 
   snapshots$.pipe(auditTime(persistThrottleMs)).subscribe((snapshot) => {
-    persistence.enqueue({
+    eventBus.emit({
       id: crypto.randomUUID(),
       type: 'portfolio.snapshot',
       data: snapshot,
@@ -509,7 +575,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
 
   analytics$.pipe(auditTime(persistThrottleMs)).subscribe((analytics: PortfolioAnalytics) => {
     metrics.portfolioNav.set(analytics.nav);
-    persistence.enqueue({
+    eventBus.emit({
       id: crypto.randomUUID(),
       type: 'pnl.analytics',
       data: analytics,
@@ -526,7 +592,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     live,
     runtimeMeta: {
       live,
-      strategies: () => strategyTelemetry.snapshot()
+      strategies: () => strategyTelemetry.snapshot(),
+      events: () => ringBuffer.getRecent(100)
     },
     accounting: { balanceTelemetry },
     rebalancer: () => rebalancer.getTelemetry()

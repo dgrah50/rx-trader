@@ -24,4 +24,8 @@ export class HistoricalFeedAdapter implements FeedAdapter {
   connect() {
     // no-op; data is pushed via the runner
   }
+
+  disconnect() {
+    this.subject.complete();
+  }
 }

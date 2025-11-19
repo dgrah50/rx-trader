@@ -3,12 +3,7 @@ import {
   accountBalanceSnapshotSchema
 } from '@rx-trader/core/domain';
 import { safeParse } from '@rx-trader/core/validation';
-import type {
-  BalanceProvider,
-  BalanceSnapshot,
-  BalanceSyncOptions,
-  BalanceSyncTelemetry
-} from './types';
+import type { BalanceSnapshot, BalanceSyncOptions, BalanceSyncTelemetry } from './types';
 
 const EPSILON = 1e-9;
 

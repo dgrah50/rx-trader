@@ -44,14 +44,20 @@ describe('domain schemas', () => {
           avgPx: 100,
           unrealized: 500,
           realized: 0,
-          notional: 10_500
+          netRealized: 0,
+          grossRealized: 0,
+          notional: 10_500,
+          pnl: 500
         }
       },
       nav: 100_000,
       pnl: 1_200,
       realized: 800,
+      netRealized: 800,
+      grossRealized: 800,
       unrealized: 400,
-      cash: 80_000
+      cash: 80_000,
+      feesPaid: 25
     };
     expect(() => portfolioSnapshotSchema.parse(data)).not.toThrow();
     expect(() => domainEventDataSchemas['portfolio.snapshot'].parse(data)).not.toThrow();
@@ -63,6 +69,8 @@ describe('domain schemas', () => {
       nav: 100_500,
       pnl: 500,
       realized: 300,
+      netRealized: 300,
+      grossRealized: 300,
       unrealized: 200,
       cash: 80_100,
       peakNav: 101_000,
@@ -75,6 +83,8 @@ describe('domain schemas', () => {
           avgPx: 60_000,
           markPx: 61_000,
           realized: 100,
+          netRealized: 100,
+          grossRealized: 100,
           unrealized: 500,
           notional: 30_500
         }

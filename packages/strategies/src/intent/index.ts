@@ -108,6 +108,7 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
     repriceBps: opts.policy.repriceBps ?? 0,
     tif: opts.policy.tif ?? 'DAY'
   } as Required<ExecutionPolicy>;
+  const logIntentFilter = (process.env.DEBUG_INTENT_FILTER ?? '').toLowerCase() === 'true';
 
   const tickCache = new Map<string, MarketTick>();
   const cooldownMap = new Map<string, number>();
@@ -180,7 +181,14 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
     const edgeBps = computeEdgeBps(signal.px, execRefPx, signal.action as Side);
     const feeBps = policy.takerFeeBps;
     const required = policy.minEdgeBps + feeBps + policy.takerSlipBps;
-    if (edgeBps < required) return null;
+    if (edgeBps < required) {
+      if (logIntentFilter) {
+        console.log(
+          `[intent] drop-taker edgeBps=${edgeBps.toFixed(3)} required=${required} signal=${signal.action} px=${signal.px} tick=${tick.last ?? tick.bid ?? tick.ask}`
+        );
+      }
+      return null;
+    }
 
     const qty = computeQty(execRefPx);
     if (qty <= 0) return null;
@@ -254,6 +262,11 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
     const feeBps = policy.makerFeeBps;
     const required = policy.minEdgeBps + feeBps + policy.adverseSelectionBps;
     if (edgeBps < required) {
+      if (logIntentFilter) {
+        console.log(
+          `[intent] drop-maker edgeBps=${edgeBps.toFixed(3)} required=${required} signal=${signal.action} px=${signal.px} tick=${tick.last ?? tick.bid ?? tick.ask}`
+        );
+      }
       return null;
     }
 

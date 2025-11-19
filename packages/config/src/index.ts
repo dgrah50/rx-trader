@@ -2,17 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
-import {
-  FeedType,
-  StrategyType,
-  parseFeedType,
-  parseStrategyType,
-} from '@rx-trader/core/constants';
+import { parseFeedType, parseStrategyType } from '@rx-trader/core/constants';
+import type { FeedType, StrategyType } from '@rx-trader/core/constants';
 import { safeParse } from '@rx-trader/core/validation';
 import { exitConfigSchema, type ExitConfig } from './strategy-exits.schema';
 export type { ExitConfig } from './strategy-exits.schema';
 export { exitConfigSchema } from './strategy-exits.schema';
 import type { RebalanceTarget } from '@rx-trader/portfolio/rebalancer/types';
+import { DEFAULT_STRATEGIES_JSON } from './defaultStrategies';
 
 const DEFAULT_CONFIG_FILENAME = 'rx.config.json';
 
@@ -52,12 +49,7 @@ export const envSchema = z.object({
   HYPERLIQUID_SUBACCOUNT: z.coerce.number().optional(),
   SPOT_MARGIN_ENABLED: booleanEnv.default(false),
   SPOT_MARGIN_LEVERAGE: z.coerce.number().default(1),
-  STRATEGY_TYPE: z.string().default(StrategyType.Pair),
-  STRATEGY_TRADE_SYMBOL: z.string().default('BTCUSDT'),
-  STRATEGY_PRIMARY_FEED: z.string().default(FeedType.Binance),
-  STRATEGY_EXTRA_FEEDS: z.string().default(''),
-  STRATEGY_PARAMS: z.string().default('{}'),
-  STRATEGIES: z.string().default(''),
+  STRATEGIES: z.string().default(DEFAULT_STRATEGIES_JSON),
   RISK_NOTIONAL_LIMIT: z.coerce.number().default(1_000_000),
   RISK_MAX_POSITION: z.coerce.number().default(1),
   RISK_PRICE_BAND_MIN: z.coerce.number().default(0),
@@ -227,8 +219,12 @@ const collectInputs = (
   };
 };
 
-const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
-  app: {
+const mapEnvToConfig = (env: z.infer<typeof envSchema>) => {
+  const risk = buildRiskConfig(env);
+  const strategies = buildStrategiesConfig(env, risk);
+
+  return {
+    app: {
     env: env.NODE_ENV,
     name: env.APP_NAME,
     version: env.VERSION,
@@ -349,60 +345,57 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => ({
       leverageCap: env.SPOT_MARGIN_LEVERAGE,
     },
   },
-  strategies: buildStrategiesConfig(env),
-  risk: buildRiskConfig(env),
-});
+    strategies,
+    risk,
+  };
+};
 
-const parseJson = (value: string, label: string): Record<string, unknown> => {
-  try {
-    return value.trim() ? (JSON.parse(value) as Record<string, unknown>) : {};
-  } catch (error) {
-    throw new Error(`Invalid JSON for ${label}: ${(error as Error).message}`);
+const buildStrategiesConfig = (env: z.infer<typeof envSchema>, risk: RiskConfig) => {
+  const entries = parseJsonArray(env.STRATEGIES, 'STRATEGIES');
+  if (!entries.length) {
+    throw new Error('STRATEGIES must define at least one strategy');
   }
+
+  const seenIds = new Set<string>();
+  const definitions = entries.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`STRATEGIES[${index}] must be an object`);
+    }
+    const definition = normalizeStrategyDefinition(entry as Record<string, unknown>, risk, index);
+    if (seenIds.has(definition.id)) {
+      throw new Error(`Duplicate strategy id '${definition.id}' in STRATEGIES`);
+    }
+    seenIds.add(definition.id);
+    return definition;
+  });
+
+  ensureRiskPriceBands(definitions, risk, env.RISK_PRICE_BAND_MIN, env.RISK_PRICE_BAND_MAX);
+  return definitions;
 };
 
-const parseExtraFeeds = (raw: string): FeedType[] =>
-  raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => parseFeedType(entry));
-
-const buildStrategyConfig = (env: z.infer<typeof envSchema>) => {
-  const type = parseStrategyType(env.STRATEGY_TYPE);
-  const primaryFeed = parseFeedType(env.STRATEGY_PRIMARY_FEED);
-  const extraFeeds = parseExtraFeeds(env.STRATEGY_EXTRA_FEEDS);
-  const params = parseJson(env.STRATEGY_PARAMS, 'STRATEGY_PARAMS');
-
-  return {
-    type,
-    tradeSymbol: env.STRATEGY_TRADE_SYMBOL.toUpperCase(),
-    primaryFeed,
-    extraFeeds,
-    params,
-  } satisfies StrategyConfig;
-};
-
-const buildStrategiesConfig = (env: z.infer<typeof envSchema>) => {
-  const baseStrategy = buildStrategyConfig(env);
-  const baseRisk = buildRiskConfig(env);
-  const parsed = parseStrategies(env.STRATEGIES, baseStrategy, baseRisk);
-  return parsed;
-};
-
-const buildRiskConfig = (env: z.infer<typeof envSchema>) => {
-  const tradeSymbol = env.STRATEGY_TRADE_SYMBOL.toUpperCase();
-  return {
+const buildRiskConfig = (env: z.infer<typeof envSchema>) =>
+  ({
     notional: env.RISK_NOTIONAL_LIMIT,
     maxPosition: env.RISK_MAX_POSITION,
-    priceBands: {
-      [tradeSymbol]: { min: env.RISK_PRICE_BAND_MIN, max: env.RISK_PRICE_BAND_MAX },
-    },
+    priceBands: Object.create(null) as Record<string, { min: number; max: number }>,
     throttle: {
       windowMs: env.RISK_THROTTLE_WINDOW_MS,
       maxCount: env.RISK_THROTTLE_MAX_COUNT,
     },
-  } satisfies RiskConfig;
+  }) satisfies RiskConfig;
+
+const ensureRiskPriceBands = (
+  strategies: StrategyDefinition[],
+  risk: RiskConfig,
+  min: number,
+  max: number,
+) => {
+  for (const definition of strategies) {
+    const symbol = definition.tradeSymbol.toUpperCase();
+    if (!risk.priceBands[symbol]) {
+      risk.priceBands[symbol] = { min, max };
+    }
+  }
 };
 
 const parseJsonArray = (raw: string, label: string): unknown[] => {
@@ -417,75 +410,30 @@ const parseJsonArray = (raw: string, label: string): unknown[] => {
   }
 };
 
-const parseRebalanceTargets = (raw: string): RebalanceTarget[] => {
-  try {
-    return parseJsonArray(raw, 'REBALANCER_TARGETS').map((entry) => {
-      if (!entry || typeof entry !== 'object') {
-        throw new Error('Each rebalance target must be an object');
-      }
-      const { venue, asset, min, max, target, priority } = entry as Record<string, unknown>;
-      if (typeof venue !== 'string' || !venue) {
-        throw new Error('Rebalance target missing venue');
-      }
-      if (typeof asset !== 'string' || !asset) {
-        throw new Error('Rebalance target missing asset');
-      }
-      return {
-        venue,
-        asset,
-        min: typeof min === 'number' ? min : undefined,
-        max: typeof max === 'number' ? max : undefined,
-        target: typeof target === 'number' ? target : undefined,
-        priority: typeof priority === 'number' ? priority : undefined,
-      } satisfies RebalanceTarget;
-    });
-  } catch (error) {
-    throw error;
-  }
-};
-
-const defaultExitConfig = exitConfigSchema.parse({ enabled: false });
-
-const parseStrategies = (
-  raw: string,
-  fallbackStrategy: StrategyConfig,
-  fallbackRisk: RiskConfig,
-): StrategyDefinition[] => {
-  if (!raw.trim()) {
-    return [createFallbackStrategyDefinition(fallbackStrategy, fallbackRisk)];
-  }
-
-  const entries = parseJsonArray(raw, 'STRATEGIES');
-  if (!entries.length) {
-    return [createFallbackStrategyDefinition(fallbackStrategy, fallbackRisk)];
-  }
-
-  const seenIds = new Set<string>();
-  const definitions = entries.map((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      throw new Error(`STRATEGIES[${index}] must be an object`);
+const parseRebalanceTargets = (raw: string): RebalanceTarget[] =>
+  parseJsonArray(raw, 'REBALANCER_TARGETS').map((entry, idx) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`REBALANCER_TARGETS[${idx}] must be an object`);
     }
-    return normalizeStrategyDefinition(
-      entry as Record<string, unknown>,
-      fallbackStrategy,
-      fallbackRisk,
-      index,
-    );
+    const { venue, asset, min, max, target, priority } = entry as Record<string, unknown>;
+    if (typeof venue !== 'string' || !venue) {
+      throw new Error(`REBALANCER_TARGETS[${idx}] is missing venue`);
+    }
+    if (typeof asset !== 'string' || !asset) {
+      throw new Error(`REBALANCER_TARGETS[${idx}] is missing asset`);
+    }
+    return {
+      venue,
+      asset,
+      min: typeof min === 'number' ? min : undefined,
+      max: typeof max === 'number' ? max : undefined,
+      target: typeof target === 'number' ? target : undefined,
+      priority: typeof priority === 'number' ? priority : undefined,
+    } satisfies RebalanceTarget;
   });
-
-  for (const def of definitions) {
-    if (seenIds.has(def.id)) {
-      throw new Error(`Duplicate strategy id '${def.id}' in STRATEGIES`);
-    }
-    seenIds.add(def.id);
-  }
-
-  return definitions;
-};
 
 const normalizeStrategyDefinition = (
   entry: Record<string, unknown>,
-  fallbackStrategy: StrategyConfig,
   fallbackRisk: RiskConfig,
   index: number,
 ): StrategyDefinition => {
@@ -495,14 +443,24 @@ const normalizeStrategyDefinition = (
   }
 
   const type =
-    typeof entry.type === 'string' ? parseStrategyType(entry.type) : fallbackStrategy.type;
+    typeof entry.type === 'string'
+      ? parseStrategyType(entry.type)
+      : (() => {
+          throw new Error(`STRATEGIES[${index}].type is required`);
+        })();
   const tradeSymbolRaw =
-    typeof entry.tradeSymbol === 'string' ? entry.tradeSymbol : fallbackStrategy.tradeSymbol;
+    typeof entry.tradeSymbol === 'string' && entry.tradeSymbol.trim().length
+      ? entry.tradeSymbol
+      : (() => {
+          throw new Error(`STRATEGIES[${index}].tradeSymbol is required`);
+        })();
   const tradeSymbol = tradeSymbolRaw.toUpperCase();
   const primaryFeed =
     typeof entry.primaryFeed === 'string'
       ? parseFeedType(entry.primaryFeed)
-      : fallbackStrategy.primaryFeed;
+      : (() => {
+          throw new Error(`STRATEGIES[${index}].primaryFeed is required`);
+        })();
   const extraFeeds = Array.isArray(entry.extraFeeds)
     ? entry.extraFeeds.map((feed, feedIdx) => {
         if (typeof feed !== 'string') {
@@ -510,12 +468,12 @@ const normalizeStrategyDefinition = (
         }
         return parseFeedType(feed);
       })
-    : fallbackStrategy.extraFeeds;
+    : [];
 
   const params =
     (entry.params && typeof entry.params === 'object' && !Array.isArray(entry.params)
       ? (entry.params as Record<string, unknown>)
-      : fallbackStrategy.params) ?? {};
+      : {}) ?? {};
 
   const mode = entry.mode === 'sandbox' ? 'sandbox' : 'live';
   const priority = typeof entry.priority === 'number' ? entry.priority : 0;
@@ -527,6 +485,11 @@ const normalizeStrategyDefinition = (
   };
 
   const budget = normalizeBudget(entry.budget, baseBudget);
+  if (!Object.prototype.hasOwnProperty.call(entry, 'exit')) {
+    throw new Error(
+      `STRATEGIES[${index}].exit is required. Provide an exit block (set {"enabled": false} to disable exits).`,
+    );
+  }
   const exit = normalizeExit(entry.exit, index);
 
   return {
@@ -571,30 +534,12 @@ const normalizeBudget = (
   return { notional, maxPosition, throttle } satisfies StrategyBudgetConfig;
 };
 
-const createFallbackStrategyDefinition = (
-  strategy: StrategyConfig,
-  risk: RiskConfig,
-): StrategyDefinition => ({
-  id: 'default',
-  mode: 'live',
-  priority: 0,
-  type: strategy.type,
-  tradeSymbol: strategy.tradeSymbol,
-  primaryFeed: strategy.primaryFeed,
-  extraFeeds: strategy.extraFeeds,
-  params: strategy.params,
-  budget: {
-    notional: risk.notional,
-    maxPosition: risk.maxPosition,
-    throttle: { ...risk.throttle },
-  },
-  exit: defaultExitConfig,
-});
-
 const normalizeExit = (raw: unknown, index?: number): ExitConfig => {
   const label = index != null ? `STRATEGIES[${index}].exit` : 'STRATEGIES.exit';
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return defaultExitConfig;
+    throw new Error(
+      `${label} must be an object. Use {"enabled": false} to explicitly disable exits.`,
+    );
   }
   try {
     return exitConfigSchema.parse({ enabled: false, ...(raw as Record<string, unknown>) });
@@ -609,6 +554,7 @@ export interface StrategyConfig {
   primaryFeed: FeedType;
   extraFeeds: FeedType[];
   params: Record<string, unknown>;
+  exit: ExitConfig;
 }
 
 interface RiskConfig {
@@ -646,11 +592,6 @@ export interface ExecutionPolicyConfig {
   repriceBps: number;
 }
 
-interface ExecutionConfig {
-  account: string;
-  policy: ExecutionPolicyConfig;
-}
-
 export type StrategyMode = 'live' | 'sandbox';
 
 export interface StrategyBudgetConfig {
@@ -667,7 +608,6 @@ export interface StrategyDefinition extends StrategyConfig {
   mode: StrategyMode;
   priority: number;
   budget: StrategyBudgetConfig;
-  exit?: ExitConfig;
 }
 
 export const loadConfigDetails = (overrides: EnvOverrides = {}): LoadedConfigDetails => {
@@ -686,3 +626,6 @@ export const loadConfigDetails = (overrides: EnvOverrides = {}): LoadedConfigDet
 export const loadConfig = (overrides: EnvOverrides = {}) => {
   return loadConfigDetails(overrides).config;
 };
+
+export { DEFAULT_STRATEGIES, DEFAULT_STRATEGIES_JSON } from './defaultStrategies';
+export type { StrategyPreset } from './defaultStrategies';

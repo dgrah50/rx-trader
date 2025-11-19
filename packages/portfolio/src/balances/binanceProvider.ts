@@ -1,4 +1,4 @@
-import { BalanceProvider, BalanceSnapshot } from './types';
+import type { BalanceProvider, BalanceSnapshot } from './types';
 import { createHmac } from 'node:crypto';
 
 interface BinanceBalanceProviderConfig {

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { Subject } from 'rxjs';
-import { createExitEngine, type ExitEngineHandle } from './exitEngine';
+import { createExitEngine } from './exitEngine';
 import type { ExitConfig } from '@rx-trader/config';
 import type { PortfolioAnalytics, PortfolioSnapshot, OrderNew } from '@rx-trader/core/domain';
 import type { PricePoint, StrategySignal } from '@rx-trader/strategies';
-import { createManualClock } from '@rx-trader/core/time';
+import { createManualClock, systemClock } from '@rx-trader/core/time';
 
 const basePosition = (
   pos: number,
@@ -18,7 +18,8 @@ const basePosition = (
   avgPx,
   unrealized: 0,
   realized: 0,
-  notional: pos * avgPx
+  notional: pos * avgPx,
+  pnl: 0
 });
 
 const emptyAnalytics: PortfolioAnalytics = {
@@ -122,6 +123,41 @@ describe('createExitEngine', () => {
     clock.advance(1_500);
     price$.next({ symbol: 'BTCUSDT', px: 100.1, t: 1_500 });
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(orders).toHaveLength(1);
+    expect(orders[0]?.meta?.reason).toBe('EXIT_TIME');
+    handle.stop();
+  });
+
+  it('triggers time exits via internal poller without new ticks', async () => {
+    const exitConfig: ExitConfig = {
+      enabled: true,
+      time: {
+        enabled: true,
+        maxHoldMs: 120,
+        pollIntervalMs: 40
+      }
+    };
+    const { positions$, price$, signals$, analytics$ } = makeStreams();
+    const handle = createExitEngine({
+      strategyId: 'strat-2b',
+      symbol: 'BTCUSDT',
+      accountId: 'ACC',
+      exit: exitConfig,
+      clock: systemClock,
+      positions$,
+      price$,
+      signals$,
+      analytics$
+    });
+
+    const orders: OrderNew[] = [];
+    handle.exitIntents$.subscribe((order) => orders.push(order));
+    analytics$.next(emptyAnalytics);
+    price$.next({ symbol: 'BTCUSDT', px: 100, t: 0 });
+    positions$.next(basePosition(0.05, 100, Date.now()));
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await flushMicrotasks();
     expect(orders).toHaveLength(1);
     expect(orders[0]?.meta?.reason).toBe('EXIT_TIME');
     handle.stop();

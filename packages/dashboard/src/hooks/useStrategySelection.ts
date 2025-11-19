@@ -48,7 +48,8 @@ const maxTimestamp = (a: number | null, b: number | null) => {
 };
 
 export const useStrategySelection = (
-  strategies: StrategyRuntimeStatus[] | undefined
+  strategies: StrategyRuntimeStatus[] | undefined,
+  options?: { defaultToFirst?: boolean }
 ): StrategySelectionResult => {
   const rows = useMemo(() => {
     return (strategies ?? [])
@@ -67,11 +68,16 @@ export const useStrategySelection = (
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>('all');
 
   useEffect(() => {
+    if (options?.defaultToFirst && selectedStrategyId === 'all' && rows.length > 0) {
+      setSelectedStrategyId(rows[0].id);
+      return;
+    }
+
     if (selectedStrategyId === 'all') return;
     if (!rows.some((row) => row.id === selectedStrategyId)) {
-      setSelectedStrategyId('all');
+      setSelectedStrategyId(options?.defaultToFirst && rows.length > 0 ? rows[0].id : 'all');
     }
-  }, [rows, selectedStrategyId]);
+  }, [rows, selectedStrategyId, options?.defaultToFirst]);
 
   const selectedStrategy =
     selectedStrategyId === 'all' ? null : rows.find((row) => row.id === selectedStrategyId) ?? null;

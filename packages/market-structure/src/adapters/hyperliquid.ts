@@ -46,6 +46,9 @@ export const fetchHyperliquidMarketStructure = async (apiUrl: string = defaultUr
   const seenCurrencies = new Set<string>();
 
   for (const market of markets) {
+    if (!market?.coin || typeof market.coin !== 'string') {
+      continue;
+    }
     const base = market.coin.toUpperCase();
     const quote = 'USDC';
 

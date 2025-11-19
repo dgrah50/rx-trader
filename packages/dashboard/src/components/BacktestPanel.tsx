@@ -27,85 +27,88 @@ export const BacktestPanel = ({ artifact, onArtifactChange, history }: BacktestP
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardDescription>Load Backtest Artifact</CardDescription>
-          <CardTitle className="text-lg">Publishing</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex gap-2">
+    <div className="grid gap-4 lg:grid-cols-2 h-full">
+      <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+        <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Backtest Publishing</span>
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 px-1">
+          <div className="flex gap-1">
             <Input
               value={backtestUrl}
               onChange={(evt) => setBacktestUrl(evt.target.value)}
               placeholder="https://example.com/artifact.json"
+              className="h-6 text-xs font-mono bg-background/50 border-border/50"
             />
-            <Button variant="secondary" onClick={loadArtifact}>
+            <Button variant="secondary" size="sm" className="h-6 px-2 text-[10px] uppercase tracking-wider" onClick={loadArtifact}>
               Load
             </Button>
-            <Button variant="ghost" onClick={() => onArtifactChange(null)}>
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] uppercase tracking-wider" onClick={() => onArtifactChange(null)}>
               Reset
             </Button>
           </div>
           {artifact ? (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-semibold">{artifact.summary.symbol}</p>
-                <p className="text-xs text-muted-foreground">
-                  {artifact.summary.events} events · {artifact.summary.ticksUsed} ticks
-                </p>
+            <div className="space-y-2 border border-border/40 bg-card/30 rounded-sm p-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-xs font-semibold">{artifact.summary.symbol}</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {artifact.summary.events} events · {artifact.summary.ticksUsed} ticks
+                  </p>
+                </div>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid grid-cols-2 gap-2">
                 <SummaryTile label="Sharpe" value={formatNumber(artifact.summary.sharpe, 3)} />
                 <SummaryTile
                   label="Max DD %"
                   value={formatPercent(artifact.summary.maxDrawdownPct)}
                 />
               </div>
-              <Sparkline values={artifact.navCurve.map((p) => p.nav)} />
+              <div className="h-16">
+                 <Sparkline values={artifact.navCurve.map((p) => p.nav)} />
+              </div>
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              Publish via `rx backtest --publish` or load a JSON file to inspect stats here.
-            </p>
+            <div className="flex h-20 items-center justify-center text-[10px] text-muted-foreground border border-dashed border-border/30 rounded-sm">
+              Publish via `rx backtest --publish` or load JSON
+            </div>
           )}
-        </CardContent>
+        </div>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardDescription>Recent Backtests</CardDescription>
-          <CardTitle className="text-lg">History</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+        <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">History</span>
+        </div>
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-2 px-1">
           {history.map((entry) => (
-            <div key={entry.id} className="rounded-xl border border-border/40 bg-background/40 p-3">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{new Date(entry.ts).toLocaleString()}</span>
-                <span>{entry.summary?.symbol ?? '—'}</span>
+            <div key={entry.id} className="flex flex-col gap-1 rounded-sm border border-border/30 bg-card/30 p-2 hover:bg-card/50 transition-colors">
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                <span className="font-mono">{new Date(entry.ts).toLocaleString()}</span>
+                <span className="font-medium text-foreground">{entry.summary?.symbol ?? '—'}</span>
               </div>
-              <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">Sharpe</p>
-                  <p className="font-semibold">{formatNumber(entry.summary?.sharpe, 2)}</p>
+              <div className="grid grid-cols-3 gap-2 text-[10px]">
+                <div className="flex flex-col">
+                  <span className="text-muted-foreground uppercase tracking-wider text-[9px]">Sharpe</span>
+                  <span className="font-mono font-medium">{formatNumber(entry.summary?.sharpe, 2)}</span>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">Max DD %</p>
-                  <p className="font-semibold">
-                    {formatPercent(Math.abs(entry.summary?.maxDrawdownPct ?? 0))}
-                  </p>
+                <div className="flex flex-col">
+                  <span className="text-muted-foreground uppercase tracking-wider text-[9px]">Max DD</span>
+                  <span className="font-mono font-medium">{formatPercent(Math.abs(entry.summary?.maxDrawdownPct ?? 0))}</span>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">Runtime</p>
-                  <p className="font-semibold">{formatNumber(entry.summary?.runtimeMs ?? 0, 0)}ms</p>
+                <div className="flex flex-col text-right">
+                  <span className="text-muted-foreground uppercase tracking-wider text-[9px]">Runtime</span>
+                  <span className="font-mono font-medium">{formatNumber(entry.summary?.runtimeMs ?? 0, 0)}ms</span>
                 </div>
               </div>
             </div>
           ))}
           {!history.length && (
-            <p className="text-sm text-muted-foreground">No artifacts published.</p>
+            <div className="flex h-20 items-center justify-center text-[10px] text-muted-foreground">
+              No artifacts published.
+            </div>
           )}
-        </CardContent>
+        </div>
       </Card>
     </div>
   );

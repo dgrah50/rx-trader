@@ -18,26 +18,30 @@ export const GatewayCard = ({
   onOpenControl,
   onOpenMetrics
 }: GatewayCardProps) => (
-  <Card className="lg:col-span-2">
-    <CardHeader className="flex flex-row items-center justify-between">
-      <div>
-        <CardDescription>Gateway</CardDescription>
-        <CardTitle className="text-2xl">{gatewayUrl}</CardTitle>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="secondary" size="sm" className="gap-1" onClick={onOpenControl}>
-          <Link2 className="h-4 w-4" /> Open
+  <Card className="flex flex-col border-0 shadow-none bg-transparent">
+    <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Gateway</span>
+    </div>
+    <div className="space-y-2 px-1">
+      <div className="flex gap-1">
+        <Input 
+          value={gatewayUrl} 
+          onChange={(evt) => onGatewayChange(evt.target.value)} 
+          placeholder="http://localhost:8080" 
+          className="h-6 text-xs font-mono bg-background/50 border-border/50"
+        />
+        <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] uppercase tracking-wider" onClick={onCopy}>
+          Copy
         </Button>
-        <Button variant="outline" size="sm" className="gap-1" onClick={onOpenMetrics}>
-          <BarChart3 className="h-4 w-4" /> Metrics
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        <Button variant="secondary" size="sm" className="h-6 text-[10px] uppercase tracking-wider" onClick={onOpenControl}>
+          Control
+        </Button>
+        <Button variant="outline" size="sm" className="h-6 text-[10px] uppercase tracking-wider" onClick={onOpenMetrics}>
+          Metrics
         </Button>
       </div>
-    </CardHeader>
-    <CardContent className="flex flex-col gap-3 sm:flex-row">
-      <Input value={gatewayUrl} onChange={(evt) => onGatewayChange(evt.target.value)} placeholder="http://localhost:8080" />
-      <Button variant="ghost" className="sm:w-48" onClick={onCopy}>
-        Copy URL
-      </Button>
-    </CardContent>
+    </div>
   </Card>
 );

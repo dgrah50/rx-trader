@@ -9,10 +9,20 @@ import {
   parseStrategyType,
 } from '@rx-trader/core/constants';
 import { safeParse } from '@rx-trader/core/validation';
-import { marketTickSchema, accountBalanceAdjustedSchema, accountTransferSchema } from '@rx-trader/core/domain';
+import {
+  marketTickSchema,
+  accountBalanceAdjustedSchema,
+  accountTransferSchema,
+} from '@rx-trader/core/domain';
 import { startEngine } from '@rx-trader/control-plane';
 import { runBacktest, loadTicks } from '@rx-trader/backtest';
-import { loadConfig, loadConfigDetails, type AppConfig } from '@rx-trader/config';
+import {
+  DEFAULT_STRATEGIES,
+  loadConfig,
+  loadConfigDetails,
+  type AppConfig,
+  type StrategyPreset,
+} from '@rx-trader/config';
 import { createEventStore, buildProjection, balancesProjection } from '@rx-trader/event-store';
 import { planRebalance, flattenBalancesState } from '@rx-trader/portfolio';
 import {
@@ -25,6 +35,8 @@ import {
 import { fetchBinanceMarketStructure } from '@rx-trader/market-structure/adapters/binance';
 import { fetchHyperliquidMarketStructure } from '@rx-trader/market-structure/adapters/hyperliquid';
 import { createScriptClock } from './lib/scriptClock';
+
+const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 const setupLog = (message: string) => {
   console.log(`[setup] ${message}`);
@@ -72,7 +84,7 @@ const inferAssetsFromSymbol = (symbol: string) => {
     if (upper.endsWith(candidate) && upper.length > candidate.length) {
       return {
         base: upper.slice(0, -candidate.length),
-        quote: candidate
+        quote: candidate,
       };
     }
   }
@@ -109,17 +121,17 @@ const syncMarketStructures = async (exchanges: string[], sqlitePath: string, dry
               code === 'binance'
                 ? {
                     apiKey: process.env.BINANCE_API_KEY,
-                    apiSecret: process.env.BINANCE_API_SECRET
+                    apiSecret: process.env.BINANCE_API_SECRET,
                   }
                 : undefined,
-            hyperliquid: {}
+            hyperliquid: {},
           });
           setupLog(`Synced ${feeCount} fee entries for ${code}`);
         } catch (error) {
           setupLog(
             `Failed to sync fees for ${code}: ${
               error instanceof Error ? error.message : String(error)
-            }`
+            }`,
           );
         }
       }
@@ -149,9 +161,9 @@ const seedDemoEventStore = async (config: AppConfig, dryRun: boolean) => {
       venue,
       asset: quoteAsset,
       delta: 1_000,
-      reason: 'deposit'
+      reason: 'deposit',
     }),
-    ts: Date.now()
+    ts: Date.now(),
   });
   await store.append({
     id: crypto.randomUUID(),
@@ -165,7 +177,7 @@ const seedDemoEventStore = async (config: AppConfig, dryRun: boolean) => {
     ts: Date.now(),
     metadata: { source: 'setup-script', env: config.app.env },
   });
-  (store as unknown as { close?: () => Promise<void> | void }).close?.();
+  await closeEventStore(store);
 };
 
 const printSetupNextSteps = (gatewayPort: number) => {
@@ -175,6 +187,26 @@ const printSetupNextSteps = (gatewayPort: number) => {
   console.log(`  3. Visit http://localhost:${gatewayPort} for the control plane/API`);
   console.log('  4. bun run start:demo (optional sandbox)');
 };
+
+const closeEventStore = async (store: unknown) => {
+  const maybeClose = (store as { close?: () => Promise<void> | void }).close;
+  if (typeof maybeClose === 'function') {
+    await maybeClose.call(store);
+  }
+};
+
+const clonePreset = (preset: StrategyPreset): StrategyPreset => ({
+  ...preset,
+  extraFeeds: preset.extraFeeds ? [...preset.extraFeeds] : undefined,
+  params: preset.params ? { ...preset.params } : undefined,
+  budget: preset.budget
+    ? {
+        ...preset.budget,
+        throttle: preset.budget.throttle ? { ...preset.budget.throttle } : undefined,
+      }
+    : undefined,
+  exit: deepClone(preset.exit),
+});
 
 export const buildProgram = (): Command => {
   const program = new Command();
@@ -202,7 +234,7 @@ export const buildProgram = (): Command => {
   const forwardOutput = (stream: ReadableStream | undefined, label: string) => {
     if (!stream) return;
     const decoder = new TextDecoder();
-    stream
+    void stream
       .pipeTo(
         new WritableStream({
           write(chunk) {
@@ -213,8 +245,8 @@ export const buildProgram = (): Command => {
               .forEach((line) => {
                 console.log(`${label} ${line}`);
               });
-          }
-        })
+          },
+        }),
       )
       .catch(() => {});
   };
@@ -230,7 +262,7 @@ export const buildProgram = (): Command => {
       cwd: 'packages/dashboard',
       stdout: 'pipe',
       stderr: 'pipe',
-      env
+      env,
     });
     forwardOutput(proc.stdout, '[dashboard]');
     forwardOutput(proc.stderr, '[dashboard]');
@@ -269,6 +301,7 @@ export const buildProgram = (): Command => {
     let dashboardProc: ReturnType<typeof startDashboardDevServer> | null = null;
     let shuttingDown = false;
 
+    process.env.DEBUG_EXIT_ENGINE = process.env.DEBUG_EXIT_ENGINE ?? '1';
     const handle = await startEngine({
       live: options.live,
       registerSignalHandlers: false,
@@ -281,7 +314,7 @@ export const buildProgram = (): Command => {
         port: options.dashboardPort,
       });
       console.log(`Dashboard UI: http://localhost:${options.dashboardPort}`);
-      dashboardProc.exited.then((code) => {
+      void dashboardProc.exited.then((code) => {
         if (!shuttingDown && code !== 0) {
           console.error(`Dashboard exited with code ${code}`);
         }
@@ -355,9 +388,7 @@ export const buildProgram = (): Command => {
       waiters.push(
         new Promise<void>((resolve) => {
           setTimeout(async () => {
-            console.log(
-              `[env:demo] Duration ${durationSeconds}s reached, shutting down...`,
-            );
+            console.log(`[env:demo] Duration ${durationSeconds}s reached, shutting down...`);
             await shutdown();
             resolve();
           }, durationSeconds * 1000);
@@ -478,9 +509,9 @@ export const buildProgram = (): Command => {
           timestamp: Date.now(),
           binance: {
             apiKey: process.env.BINANCE_API_KEY,
-            apiSecret: process.env.BINANCE_API_SECRET
+            apiSecret: process.env.BINANCE_API_SECRET,
           },
-          hyperliquid: {}
+          hyperliquid: {},
         });
         console.log(`[fees] upserted ${count} entries for ${venue} in ${sqlitePath}`);
       } finally {
@@ -775,7 +806,7 @@ export const buildProgram = (): Command => {
         'fee',
         'manual',
         'fill',
-        'sync'
+        'sync',
       ];
       if (!allowedReasons.includes(reason)) {
         throw new Error(`Reason must be one of: ${allowedReasons.join(', ')}`);
@@ -802,9 +833,9 @@ export const buildProgram = (): Command => {
           asset: String(opts.asset ?? 'USD').toUpperCase(),
           delta: amount,
           reason,
-          metadata: metadata ?? { source: 'rx account:seed' }
+          metadata: metadata ?? { source: 'rx account:seed' },
         },
-        { force: true }
+        { force: true },
       );
 
       if (opts.dryRun) {
@@ -818,13 +849,13 @@ export const buildProgram = (): Command => {
           id: crypto.randomUUID(),
           type: 'account.balance.adjusted',
           data: payload,
-          ts: payload.t
+          ts: payload.t,
         });
         console.log(
-          `Appended account.balance.adjusted for ${accountId} (${venue} ${payload.asset} ${payload.delta})`
+          `Appended account.balance.adjusted for ${accountId} (${venue} ${payload.asset} ${payload.delta})`,
         );
       } finally {
-        (store as unknown as { close?: () => Promise<void> | void }).close?.();
+        await closeEventStore(store);
       }
     });
 
@@ -853,18 +884,18 @@ export const buildProgram = (): Command => {
           console.log('Suggested transfers:');
           plan.transfers.forEach((transfer) => {
             console.log(
-              `  ${transfer.amount} ${transfer.from.asset} from ${transfer.from.venue} -> ${transfer.to.venue} (${transfer.reason})`
+              `  ${transfer.amount} ${transfer.from.asset} from ${transfer.from.venue} -> ${transfer.to.venue} (${transfer.reason})`,
             );
           });
         }
         if (plan.deficits.length) {
           console.log('\nUnresolved deficits:');
           plan.deficits.forEach((def) =>
-            console.log(`  ${def.venue} ${def.asset} shortfall ${def.shortfall} (${def.reason})`)
+            console.log(`  ${def.venue} ${def.asset} shortfall ${def.shortfall} (${def.reason})`),
           );
         }
       } finally {
-        (store as unknown as { close?: () => Promise<void> | void }).close?.();
+        await closeEventStore(store);
       }
     });
 
@@ -898,9 +929,9 @@ export const buildProgram = (): Command => {
           fromVenue,
           toVenue,
           asset,
-          amount
+          amount,
         },
-        { force: true }
+        { force: true },
       );
       const debits = safeParse(
         accountBalanceAdjustedSchema,
@@ -911,9 +942,9 @@ export const buildProgram = (): Command => {
           venue: fromVenue,
           asset,
           delta: -amount,
-          reason: 'transfer'
+          reason: 'transfer',
         },
-        { force: true }
+        { force: true },
       );
       const credits = safeParse(
         accountBalanceAdjustedSchema,
@@ -924,39 +955,37 @@ export const buildProgram = (): Command => {
           venue: toVenue,
           asset,
           delta: amount,
-          reason: 'transfer'
+          reason: 'transfer',
         },
-        { force: true }
+        { force: true },
       );
 
       const store = await createEventStore(config);
       try {
-        await store.append([
-          {
+        await store.append({
           id: crypto.randomUUID(),
           type: 'account.transfer',
           data: transferPayload,
           ts: now,
-          metadata: opts.requestId ? { requestId: opts.requestId } : undefined
-        },
-        {
+          metadata: opts.requestId ? { requestId: opts.requestId } : undefined,
+        });
+        await store.append({
           id: crypto.randomUUID(),
           type: 'account.balance.adjusted',
           data: opts.requestId ? { ...debits, metadata: { requestId: opts.requestId } } : debits,
-          ts: now
-        },
-        {
+          ts: now,
+        });
+        await store.append({
           id: crypto.randomUUID(),
           type: 'account.balance.adjusted',
           data: opts.requestId ? { ...credits, metadata: { requestId: opts.requestId } } : credits,
-          ts: now
-        }
-        ]);
+          ts: now,
+        });
         console.log(
-          `Recorded transfer of ${amount} ${asset} from ${fromVenue} to ${toVenue} for ${accountId}`
+          `Recorded transfer of ${amount} ${asset} from ${fromVenue} to ${toVenue} for ${accountId}`,
         );
       } finally {
-        (store as unknown as { close?: () => Promise<void> | void }).close?.();
+        await closeEventStore(store);
       }
     });
 
@@ -1036,26 +1065,13 @@ export const buildProgram = (): Command => {
       ensurePersistenceEnv(driver, opts.sqlite, { force: true });
       const selectedFeed = parseFeedType(opts.feed ?? FeedType.Binance);
       const tradeSymbol = opts.symbol?.toUpperCase() ?? 'BTCUSDT';
-      process.env.STRATEGY_TRADE_SYMBOL = tradeSymbol;
-      process.env.STRATEGY_PRIMARY_FEED = selectedFeed;
-      process.env.STRATEGY_EXTRA_FEEDS = '';
-      if (!process.env.STRATEGY_TYPE) {
-        process.env.STRATEGY_TYPE = StrategyType.Momentum;
-      }
-      if (!process.env.STRATEGY_PARAMS) {
-        process.env.STRATEGY_PARAMS = JSON.stringify({
-          symbol: tradeSymbol,
-          fastWindow: 5,
-          slowWindow: 20,
-        });
-      }
       process.env.RISK_NOTIONAL_LIMIT = process.env.RISK_NOTIONAL_LIMIT ?? '1000000';
       process.env.RISK_MAX_POSITION = process.env.RISK_MAX_POSITION ?? '100';
       process.env.RISK_PRICE_BAND_MIN = process.env.RISK_PRICE_BAND_MIN ?? '0';
       process.env.RISK_PRICE_BAND_MAX =
         process.env.RISK_PRICE_BAND_MAX ?? String(Number.MAX_SAFE_INTEGER);
-      process.env.RISK_THROTTLE_WINDOW_MS = process.env.RISK_THROTTLE_WINDOW_MS ?? '5000';
-      process.env.RISK_THROTTLE_MAX_COUNT = process.env.RISK_THROTTLE_MAX_COUNT ?? '1';
+      process.env.RISK_THROTTLE_WINDOW_MS = process.env.RISK_THROTTLE_WINDOW_MS ?? '100';
+      process.env.RISK_THROTTLE_MAX_COUNT = process.env.RISK_THROTTLE_MAX_COUNT ?? '50';
       if (!process.env.INTENT_MODE) {
         process.env.INTENT_MODE = 'makerPreferred';
       }
@@ -1065,60 +1081,68 @@ export const buildProgram = (): Command => {
       if (!process.env.INTENT_MIN_EDGE_BPS) {
         process.env.INTENT_MIN_EDGE_BPS = '0';
       }
+      if (!process.env.MAKER_FEE_BPS) {
+        process.env.MAKER_FEE_BPS = '0';
+      }
+      if (!process.env.TAKER_FEE_BPS) {
+        process.env.TAKER_FEE_BPS = '0';
+      }
       if (!process.env.INTENT_DEFAULT_QTY) {
         process.env.INTENT_DEFAULT_QTY = selectedFeed === FeedType.Binance ? '0.001' : '1';
       }
 
       if (!process.env.STRATEGIES) {
-        const demoStrategies = [
-          {
-            id: 'momentum-main',
-            type: StrategyType.Momentum,
-            tradeSymbol,
-            primaryFeed: selectedFeed,
-            extraFeeds: [],
-            mode: 'live',
-            priority: 10,
-            params: {
-              fastWindow: 5,
-              slowWindow: 20,
-              minConsensus: 1,
-              maxSignalAgeMs: 2_000,
-              minActionIntervalMs: 1_000,
-            },
-            budget: {
-              notional: 250_000,
-              maxPosition: 2,
-              throttle: { windowMs: 1_000, maxCount: 2 },
-            },
-          },
-          {
-            id: 'arb-binance-hl',
-            type: StrategyType.Arbitrage,
-            tradeSymbol,
-            primaryFeed: FeedType.Binance,
-            extraFeeds: [FeedType.Hyperliquid],
-            mode: 'live',
-            priority: 6,
-            params: {
-              primaryVenue: FeedType.Binance,
-              secondaryVenue: FeedType.Hyperliquid,
-              spreadBps: 3,
-              maxAgeMs: 3_000,
-              minIntervalMs: 200,
-              priceSource: 'mid',
-              maxSkewBps: 15,
-              sizeBps: 25,
-              minEdgeBps: 1,
-            },
-            budget: {
-              notional: 150_000,
-              maxPosition: 2,
-              throttle: { windowMs: 500, maxCount: 4 },
-            },
-          },
-        ];
+        const demoStrategies = DEFAULT_STRATEGIES.map((preset) => {
+          const clone = clonePreset(preset);
+          clone.tradeSymbol = tradeSymbol;
+          if (clone.id === 'momentum-main') {
+            clone.primaryFeed = selectedFeed;
+            clone.extraFeeds = [];
+            if (clone.params) {
+              clone.params = { ...clone.params, tradeSymbol };
+            }
+          }
+          return clone;
+        });
         process.env.STRATEGIES = JSON.stringify(demoStrategies);
+      }
+
+      const collectVenueExchanges = () => {
+        const venues = new Set<string>();
+        const addFeedVenue = (feed?: FeedType) => {
+          if (!feed) return;
+          const venue = feedToVenue(feed);
+          if (venue && venue !== 'paper') {
+            venues.add(venue);
+          }
+        };
+        addFeedVenue(selectedFeed);
+        try {
+          const parsed = process.env.STRATEGIES ? JSON.parse(process.env.STRATEGIES) : [];
+          if (Array.isArray(parsed)) {
+            parsed.forEach((strategy) => {
+              addFeedVenue(strategy?.primaryFeed);
+              if (Array.isArray(strategy?.extraFeeds)) {
+                strategy.extraFeeds.forEach((feed: FeedType) => addFeedVenue(feed));
+              }
+            });
+          }
+        } catch {
+          // ignore malformed STRATEGIES env; best effort
+        }
+        return Array.from(venues);
+      };
+
+      const exchangesToSync = collectVenueExchanges();
+      if (exchangesToSync.length) {
+        try {
+          const config = loadConfig();
+          await syncMarketStructures(exchangesToSync, config.marketStructure.sqlitePath, false);
+        } catch (error) {
+          setupLog(
+            `Failed to sync market data for demo env: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
 
       const envPref = process.env.RX_RUN_DASHBOARD;
@@ -1138,7 +1162,8 @@ export const buildProgram = (): Command => {
         dashboardEnabled,
         dashboardPort,
         openDashboard: openDashboard && dashboardEnabled,
-        durationSeconds: Number.isFinite(durationSeconds) && durationSeconds! > 0 ? durationSeconds : undefined
+        durationSeconds:
+          Number.isFinite(durationSeconds) && durationSeconds! > 0 ? durationSeconds : undefined,
       });
       if (process.env.RX_DEBUG_SHUTDOWN === '1') {
         console.log('[env:demo] runTraderProcess resolved');

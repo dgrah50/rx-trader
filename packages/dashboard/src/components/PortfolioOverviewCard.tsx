@@ -1,18 +1,12 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import type { BalanceEntry } from '../types';
+import type { BalanceEntry, PositionSnapshot } from '../types';
 import { cn } from '@/lib/utils';
-
-interface PositionSnapshot {
-  pos: number;
-  avgPx: number;
-  px: number;
-  pnl: number;
-}
 
 interface PortfolioOverviewProps {
   nav: number | null | undefined;
-  realized: number | null | undefined;
+  netRealized: number | null | undefined;
+  grossRealized: number | null | undefined;
   unrealized: number | null | undefined;
   feesPaid: number | null | undefined;
   positions: Array<[string, PositionSnapshot]>;
@@ -22,7 +16,8 @@ interface PortfolioOverviewProps {
 
 export const PortfolioOverviewCard = ({
   nav,
-  realized,
+  netRealized,
+  grossRealized,
   unrealized,
   feesPaid,
   positions,
@@ -43,73 +38,80 @@ export const PortfolioOverviewCard = ({
   const stableBalance = balances.find((entry) => /USD/i.test(entry.asset)) ?? balances[0];
   const totalCash = balances.reduce((sum, entry) => sum + (entry.available ?? 0), 0);
 
+  const formatCurrency = (val: number | undefined | null) => `$${formatNumber(val ?? 0)}`;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardDescription>Portfolio</CardDescription>
-        <CardTitle className="text-2xl">Account Overview</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Metric label="Net Asset Value" value={`$${formatNumber(nav ?? 0)}`} />
-          <Metric
-            label="Unrealized PnL"
-            value={`$${formatNumber(unrealized ?? 0)}`}
-            intent={(unrealized ?? 0) >= 0 ? 'ok' : 'warn'}
-          />
-          <Metric
-            label="Realized PnL"
-            value={`$${formatNumber(realized ?? 0)}`}
-            intent={(realized ?? 0) >= 0 ? 'ok' : 'warn'}
-          />
-          <Metric
-            label="Fees Paid"
-            value={`$${formatNumber(feesPaid ?? 0)}`}
-            intent={feesPaid && feesPaid > 0 ? 'warn' : undefined}
-          />
-        </div>
-        <Separator className="bg-border/60" />
-        <div className="grid gap-3 sm:grid-cols-4">
-          <Metric label="Cash (all venues)" value={`$${formatNumber(totalCash)}`} />
-          <Metric
-            label={
-              stableBalance ? `${stableBalance.asset} @ ${stableBalance.venue}` : 'Primary balance'
-            }
-            value={
-              stableBalance ? formatNumber(stableBalance.available + stableBalance.locked) : '—'
-            }
-          />
-          <Metric label="Gross Exposure" value={`$${formatNumber(exposureTotals.gross)}`} />
-          <Metric
-            label="Net Exposure"
-            value={`$${formatNumber(exposureTotals.net)}`}
-            intent={Math.abs(exposureTotals.net) > 0 ? 'info' : undefined}
-          />
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex items-center gap-6 px-3 py-2 bg-card/30 border-b border-border/50">
+      <Metric
+        label="NAV"
+        value={formatCurrency(nav)}
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Net PnL"
+        value={formatCurrency(netRealized)}
+        trend={(netRealized ?? 0) >= 0 ? 'up' : 'down'}
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Unrealized"
+        value={formatCurrency(unrealized)}
+        trend={(unrealized ?? 0) >= 0 ? 'up' : 'down'}
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Fees"
+        value={formatCurrency(feesPaid)}
+        trend="down"
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Cash"
+        value={formatCurrency(totalCash)}
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Gross Exp"
+        value={formatCurrency(exposureTotals.gross)}
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Net Exp"
+        value={formatCurrency(exposureTotals.net)}
+      />
+      <Separator orientation="vertical" className="h-8" />
+      <Metric
+        label="Gross PnL"
+        value={formatCurrency(grossRealized)}
+        trend={(grossRealized ?? 0) >= 0 ? 'up' : 'down'}
+      />
+    </div>
   );
 };
 
-const Metric = ({
-  label,
-  value,
-  intent,
-}: {
+interface MetricProps {
   label: string;
   value: string;
-  intent?: 'ok' | 'warn' | 'info';
-}) => (
-  <div className="rounded-md border border-border/50 bg-background/40 p-3">
-    <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
-    <p
-      className={cn(
-        'text-lg font-semibold text-foreground',
-        intent === 'ok' && 'text-emerald-400',
-        intent === 'warn' && 'text-rose-400',
+  subValue?: string;
+  trend?: 'up' | 'down';
+  className?: string;
+}
+
+const Metric = ({ label, value, subValue, trend, className }: MetricProps) => (
+  <div className={cn("flex flex-col gap-0.5", className)}>
+    <span className="text-[10px] text-muted-foreground/70 leading-none">{label}</span>
+    <div className="flex items-baseline gap-1">
+      <span className={cn(
+        "text-sm font-mono font-semibold leading-none tracking-tight",
+        trend === 'up' && "text-up",
+        trend === 'down' && "text-down",
+        !trend && "text-foreground"
+      )}>
+        {value}
+      </span>
+      {subValue && (
+        <span className="text-[9px] text-muted-foreground/50 font-mono leading-none">{subValue}</span>
       )}
-    >
-      {value}
-    </p>
+    </div>
   </div>
 );

@@ -1,12 +1,23 @@
 {
   "GATEWAY_PORT": 8090,
-  "STRATEGY_TRADE_SYMBOL": "ETHUSDT",
-  "STRATEGY_PRIMARY_FEED": "binance",
-  "STRATEGY_EXTRA_FEEDS": "hyperliquid",
-  "STRATEGY_PARAMS": {
-    "fastWindow": 3,
-    "slowWindow": 8
-  },
+  "STRATEGIES": [
+    {
+      "id": "btc-momo",
+      "type": "MOMENTUM",
+      "tradeSymbol": "BTCUSDT",
+      "primaryFeed": "binance",
+      "extraFeeds": ["hyperliquid"],
+      "params": {
+        "fastWindow": 3,
+        "slowWindow": 8
+      },
+      "exit": {
+        "enabled": true,
+        "time": { "enabled": true, "maxHoldMs": 300000, "minHoldMs": 10000 },
+        "tpSl": { "enabled": true, "tpSigma": 1.5, "slSigma": 1.0 }
+      }
+    }
+  ],
   "RISK_MAX_POSITION": 5,
   "RISK_NOTIONAL_LIMIT": 250000,
   "INTENT_POST_ONLY": false

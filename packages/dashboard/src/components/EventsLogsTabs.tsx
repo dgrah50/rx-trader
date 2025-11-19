@@ -10,53 +10,50 @@ interface EventsLogsTabsProps {
 }
 
 export const EventsLogsTabs = ({ events, logs }: EventsLogsTabsProps) => (
-  <Tabs defaultValue="events" className="flex flex-col lg:col-span-2">
-    <TabsList className="self-end">
-      <TabsTrigger value="events" className="gap-1 text-xs">
-        <Signal className="h-3 w-3" /> Events
-      </TabsTrigger>
-      <TabsTrigger value="logs" className="gap-1 text-xs">
-        <Activity className="h-3 w-3" /> Logs
-      </TabsTrigger>
-    </TabsList>
-    <TabsContent value="events" className="mt-4 flex-1">
-      <Card className="h-full">
-        <CardHeader>
-          <CardDescription>Most recent orchestrator events</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 space-y-3 overflow-y-auto pr-2 text-xs font-mono">
-            {events.map((evt) => (
-              <div key={evt.id} className="rounded-lg border border-border/60 bg-background/50 p-3">
-                <p className="font-semibold">{evt.type}</p>
-                <p className="text-muted-foreground">{new Date(evt.ts).toLocaleString()}</p>
-              </div>
-            ))}
-            {!events.length && <p className="text-muted-foreground">No recent events.</p>}
+  <Tabs defaultValue="events" className="flex flex-col h-full">
+    <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">System</span>
+      <TabsList className="h-6 p-0 bg-transparent gap-2">
+        <TabsTrigger 
+          value="events" 
+          className="h-5 px-2 text-[10px] data-[state=active]:bg-secondary data-[state=active]:text-secondary-foreground rounded-sm border border-transparent data-[state=active]:border-border/50"
+        >
+          Events
+        </TabsTrigger>
+        <TabsTrigger 
+          value="logs" 
+          className="h-5 px-2 text-[10px] data-[state=active]:bg-secondary data-[state=active]:text-secondary-foreground rounded-sm border border-transparent data-[state=active]:border-border/50"
+        >
+          Logs
+        </TabsTrigger>
+      </TabsList>
+    </div>
+
+    <div className="flex-1 overflow-hidden min-h-0 relative">
+      <TabsContent value="events" className="absolute inset-0 mt-0 overflow-y-auto pr-1 space-y-1">
+        {events.map((evt) => (
+          <div key={evt.id} className="flex flex-col px-2 py-1.5 rounded-sm border border-border/30 bg-card/30 hover:bg-card/50 transition-colors">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-medium text-foreground">{evt.type}</span>
+              <span className="text-[9px] text-muted-foreground font-mono">{new Date(evt.ts).toLocaleTimeString()}</span>
+            </div>
           </div>
-        </CardContent>
-      </Card>
-    </TabsContent>
-    <TabsContent value="logs" className="mt-4 flex-1">
-      <Card className="h-full">
-        <CardHeader>
-          <CardDescription>Recent log entries</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 space-y-3 overflow-y-auto pr-2 text-xs">
-            {logs.map((entry) => (
-              <div key={entry.id} className="rounded-lg border border-border/60 bg-background/50 p-3">
-                <div className="flex items-center gap-2 font-semibold">
-                  <Badge variant="outline">{entry.level}</Badge>
-                  <span>{entry.name}</span>
-                </div>
-                <p className="text-muted-foreground">{entry.msg}</p>
-              </div>
-            ))}
-            {!logs.length && <p className="text-muted-foreground">No logs yet.</p>}
+        ))}
+        {!events.length && <div className="text-[10px] text-muted-foreground p-2 text-center">No recent events.</div>}
+      </TabsContent>
+      
+      <TabsContent value="logs" className="absolute inset-0 mt-0 overflow-y-auto pr-1 space-y-1">
+        {logs.map((entry) => (
+          <div key={entry.id} className="flex flex-col px-2 py-1.5 rounded-sm border border-border/30 bg-card/30 hover:bg-card/50 transition-colors">
+            <div className="flex items-center gap-2 mb-0.5">
+              <Badge variant="outline" className="h-3.5 px-1 text-[9px] font-normal uppercase">{entry.level}</Badge>
+              <span className="text-[10px] font-mono text-muted-foreground">{entry.name}</span>
+            </div>
+            <p className="text-[10px] text-foreground/90 break-all leading-tight">{entry.msg}</p>
           </div>
-        </CardContent>
-      </Card>
-    </TabsContent>
+        ))}
+        {!logs.length && <div className="text-[10px] text-muted-foreground p-2 text-center">No logs yet.</div>}
+      </TabsContent>
+    </div>
   </Tabs>
 );

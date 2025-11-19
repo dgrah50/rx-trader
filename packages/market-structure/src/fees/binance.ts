@@ -15,10 +15,10 @@ interface BinanceTradeFeeResponse {
   takerCommission: string;
 }
 
-const BINANCE_DEFAULT_FEES = { makerBps: 10, takerBps: 10 };
+const BINANCE_DEFAULT_FEES = { makerBps: 1, takerBps: 1 };
 
 export const fetchBinanceFees = async (
-  options: BinanceFeeFetcherOptions
+  options: BinanceFeeFetcherOptions,
 ): Promise<FeeScheduleUpsert[]> => {
   const productType = options.productType ?? 'SPOT';
   const ts = options.timestamp ?? Date.now();
@@ -27,12 +27,10 @@ export const fetchBinanceFees = async (
   }
   const baseUrl = options.baseUrl ?? 'https://api.binance.com';
   const params = new URLSearchParams({ timestamp: String(ts) });
-  const signature = createHmac('sha256', options.apiSecret)
-    .update(params.toString())
-    .digest('hex');
+  const signature = createHmac('sha256', options.apiSecret).update(params.toString()).digest('hex');
   params.set('signature', signature);
   const res = await fetch(`${baseUrl}/sapi/v1/asset/tradeFee?${params.toString()}`, {
-    headers: { 'X-MBX-APIKEY': options.apiKey }
+    headers: { 'X-MBX-APIKEY': options.apiKey },
   });
   if (!res.ok) {
     return [buildDefault('binance', '*', productType, ts)];
@@ -48,7 +46,7 @@ export const fetchBinanceFees = async (
       makerBps: Number.isFinite(makerBps) ? makerBps : BINANCE_DEFAULT_FEES.makerBps,
       takerBps: Number.isFinite(takerBps) ? takerBps : BINANCE_DEFAULT_FEES.takerBps,
       effectiveFrom: Math.floor(ts / 1000),
-      source: 'binance:sapi'
+      source: 'binance:sapi',
     } satisfies FeeScheduleUpsert;
   });
 };
@@ -57,7 +55,7 @@ const buildDefault = (
   exchangeCode: string,
   symbol: string,
   productType: string,
-  ts: number
+  ts: number,
 ): FeeScheduleUpsert => ({
   exchangeCode,
   symbol,
@@ -65,5 +63,5 @@ const buildDefault = (
   makerBps: BINANCE_DEFAULT_FEES.makerBps,
   takerBps: BINANCE_DEFAULT_FEES.takerBps,
   effectiveFrom: Math.floor(ts / 1000),
-  source: 'default'
+  source: 'default',
 });

@@ -1,7 +1,7 @@
 import { EMPTY, merge, share } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { map, tap } from 'rxjs/operators';
 import type { Observable } from 'rxjs';
-import type { OrderNew, MarketTick } from '@rx-trader/core/domain';
+import type { OrderNew } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
 import type { AccountExposureGuard } from '@rx-trader/risk/preTrade';
@@ -14,12 +14,14 @@ import { createIntentBuilder as defaultCreateIntentBuilder } from '@rx-trader/st
 import type { StrategySignal } from '@rx-trader/strategies';
 import type { RuntimeStrategyConfig, StrategyMarginConfig } from './types';
 import type { RiskConfig } from './riskManager';
+import type { EventBus } from '@rx-trader/core';
 
 export interface StrategyOrchestratorOptions {
   strategies: RuntimeStrategyConfig[];
   executionAccount: string;
   executionPolicy: ExecutionPolicyConfig;
   baseRisk: RiskConfig;
+  eventBus: EventBus;
   clock?: Clock;
   accountGuard?: AccountExposureGuard;
   createFeedManager?: typeof defaultCreateFeedManager;
@@ -36,6 +38,8 @@ export interface StrategyRuntime {
   feedManager: FeedManagerResult;
   signals$: Observable<StrategySignal>;
   intents$: Observable<OrderNew>;
+  rawIntents$: Observable<OrderNew>;
+  rejects$: Observable<any>;
   fees?: RuntimeStrategyConfig['fees'];
   margin?: StrategyMarginConfig;
   exit?: RuntimeStrategyConfig['exit'];
@@ -58,6 +62,7 @@ export const createStrategyOrchestrator = (
   const strategyFactory = options.createStrategy$ ?? defaultCreateStrategy$;
   const intentBuilderFactory = options.createIntentBuilder ?? defaultCreateIntentBuilder;
   const clock = options.clock ?? systemClock;
+  const eventBus = options.eventBus;
 
   const runtimes: StrategyRuntime[] = options.strategies.map((runtimeConfig) => {
     const { definition } = runtimeConfig;
@@ -73,7 +78,25 @@ export const createStrategyOrchestrator = (
       strategy: definition,
       feedManager,
       onExternalFeedTick: () => options.onFeedTick?.()
-    }).pipe(share());
+    }).pipe(
+      tap((signal) => {
+        eventBus.emit({
+          id: crypto.randomUUID(),
+          type: 'strategy.signal',
+          data: {
+            strategyId: definition.id,
+            symbol: definition.tradeSymbol,
+            side: signal.action,
+            strength: 1.0, // Default strength as it's not in StrategySignal
+            reasons: [] // No reasons in StrategySignal
+          },
+          ts: clock.now(),
+          traceId: crypto.randomUUID(), // Start a new trace for this signal
+          metadata: {}
+        });
+      }),
+      share()
+    );
 
     const feeAwarePolicy = {
       ...options.executionPolicy,
@@ -91,7 +114,28 @@ export const createStrategyOrchestrator = (
       feeSource: runtimeConfig.fees?.source
     });
 
-    const strategyIntents$ = buildIntents(rawSignals$, feedManager.marks$).pipe(share());
+    const strategyIntents$ = buildIntents(rawSignals$, feedManager.marks$).pipe(
+      tap((intent) => {
+        // We don't have easy access to the signal's traceId here without threading it through buildIntents.
+        // For now, we'll emit the intent event. Future improvement: thread traceId.
+        const meta = intent.meta as Record<string, unknown> | undefined;
+        eventBus.emit({
+          id: crypto.randomUUID(),
+          type: 'strategy.intent',
+          data: {
+            strategyId: definition.id,
+            symbol: intent.symbol,
+            side: intent.side as 'BUY' | 'SELL',
+            qty: intent.qty,
+            targetSize: (meta?.targetSize as number) ?? undefined,
+            urgency: (meta?.urgency as any) ?? undefined
+          },
+          ts: clock.now(),
+          metadata: meta
+        });
+      }),
+      share()
+    );
 
     const [budgetApproved$, budgetRejected$] = splitRiskStream(
       strategyIntents$,
@@ -111,6 +155,8 @@ export const createStrategyOrchestrator = (
       feedManager,
       signals$: rawSignals$,
       intents$,
+      rawIntents$: strategyIntents$,
+      rejects$: budgetRejected$,
       fees: runtimeConfig.fees,
       margin: runtimeConfig.margin,
       exit: runtimeConfig.exit

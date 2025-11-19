@@ -40,14 +40,20 @@ describe('snapshotManager', () => {
             avgPx: 100,
             unrealized: 1,
             realized: 0,
-            notional: 101
+            netRealized: 0,
+            grossRealized: 0,
+            notional: 101,
+            pnl: 1
           }
         },
         nav: 101,
         pnl: 1,
         realized: 0,
+        netRealized: 0,
+        grossRealized: 0,
         unrealized: 1,
-        cash: 0
+        cash: 0,
+        feesPaid: 0
       },
       ts: clock.now()
     });

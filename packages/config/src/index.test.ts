@@ -4,7 +4,7 @@ import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { loadConfig, loadConfigDetails } from './index';
+import { DEFAULT_STRATEGIES, loadConfig, loadConfigDetails } from './index';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -33,17 +33,26 @@ describe('loadConfig', () => {
     writeFileSync(
       filePath,
       JSON.stringify({
-        STRATEGY_TRADE_SYMBOL: 'ethusdt',
+        STRATEGIES: [
+          {
+            id: 'file-strat',
+            type: 'MOMENTUM',
+            tradeSymbol: 'ethusdt',
+            primaryFeed: 'binance',
+            params: { fastWindow: 5 },
+            exit: { enabled: false }
+          }
+        ],
         RISK_MAX_POSITION: 7,
-        STRATEGY_PARAMS: { fastWindow: 5 }
+        APP_NAME: 'rx-file'
       })
     );
 
     process.env.RX_CONFIG_PATH = filePath;
-    process.env.STRATEGY_TRADE_SYMBOL = 'btcusdt';
 
     const config = loadConfig();
-    expect(config.strategies[0]?.tradeSymbol).toBe('BTCUSDT');
+    expect(config.app.name).toBe('rx-file');
+    expect(config.strategies[0]?.tradeSymbol).toBe('ETHUSDT');
     expect(config.risk.maxPosition).toBe(7);
     expect((config.strategies[0]?.params as Record<string, unknown>).fastWindow).toBe(5);
 
@@ -63,25 +72,33 @@ describe('loadConfig', () => {
     process.env.RX_CONFIG_PATH = filePath;
     process.env.INTENT_MODE = 'limit';
 
-    const details = loadConfigDetails({ INTENT_DEFAULT_QTY: '2' });
+    const details = loadConfigDetails({
+      INTENT_DEFAULT_QTY: '2',
+      STRATEGIES: JSON.stringify([
+        {
+          id: 'env-strat',
+          type: 'MOMENTUM',
+          tradeSymbol: 'btcusdt',
+          primaryFeed: 'binance',
+          exit: { enabled: false }
+        }
+      ])
+    });
     expect(details.sources.RISK_MAX_POSITION.source).toBe('file');
     expect(details.sources.INTENT_MODE.source).toBe('env');
     expect(details.sources.INTENT_DEFAULT_QTY.source).toBe('override');
-    expect(details.sources.STRATEGY_TRADE_SYMBOL.source).toBe('default');
+    expect(details.sources.STRATEGIES.source).toBe('override');
     expect(details.configFilePath).toBe(filePath);
 
     unlinkSync(filePath);
   });
 
-  it('falls back to a default strategy definition when STRATEGIES is empty', () => {
+  it('falls back to bundled default strategies when STRATEGIES is empty', () => {
+    delete process.env.STRATEGIES;
     const config = loadConfig();
-    expect(config.strategies).toHaveLength(1);
-    const [strategy] = config.strategies;
-    expect(strategy.id).toBe('default');
-    expect(strategy.mode).toBe('live');
-    expect(strategy.tradeSymbol).toBe('BTCUSDT');
-    expect(strategy.budget?.notional).toBe(config.risk.notional);
-    expect(strategy.budget?.throttle?.windowMs).toBe(config.risk.throttle.windowMs);
+    expect(config.strategies).toHaveLength(DEFAULT_STRATEGIES.length);
+    const ids = config.strategies.map((s) => s.id);
+    expect(ids).toEqual(DEFAULT_STRATEGIES.map((s) => s.id));
   });
 
   it('parses multiple strategies from STRATEGIES JSON', () => {
@@ -97,14 +114,16 @@ describe('loadConfig', () => {
         budget: {
           notional: 250000,
           throttle: { windowMs: 500, maxCount: 2 }
-        }
+        },
+        exit: { enabled: false }
       },
       {
         id: 'arb',
         type: 'ARBITRAGE',
         tradeSymbol: 'ethusdt',
         primaryFeed: 'hyperliquid',
-        extraFeeds: ['binance']
+        extraFeeds: ['binance'],
+        exit: { enabled: false }
       }
     ]);
 
@@ -161,5 +180,19 @@ describe('loadConfig', () => {
     ]);
 
     expect(() => loadConfig()).toThrow(/STRATEGIES\[0\].exit/i);
+  });
+
+  it('requires each strategy to provide an exit config', () => {
+    process.env.STRATEGIES = JSON.stringify([
+      {
+        id: 'missing-exit',
+        type: 'MOMENTUM',
+        tradeSymbol: 'btcusdt',
+        primaryFeed: 'binance',
+        params: {}
+      }
+    ]);
+
+    expect(() => loadConfig()).toThrow(/exit is required/i);
   });
 });

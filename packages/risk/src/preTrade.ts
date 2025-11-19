@@ -69,11 +69,13 @@ export const createPreTradeRisk = (
 
   return (order: OrderNew): RiskDecision => {
     const reasons: string[] = [];
+    const meta = order.meta as Record<string, unknown> | undefined;
+    const isExit = Boolean(meta?.exit);
     const referencePx = getReferencePx(order);
     const grossNotional = Math.abs(order.qty * referencePx);
     const feeRate = getExpectedFeeRate(order);
     const notionalWithFees = grossNotional * (1 + feeRate);
-    if (limits.notional && notionalWithFees > limits.notional) {
+    if (!isExit && limits.notional && notionalWithFees > limits.notional) {
       reasons.push(`notional>${limits.notional}`);
     }
 
@@ -84,21 +86,23 @@ export const createPreTradeRisk = (
     }
 
     const band = limits.priceBands[order.symbol];
-    if (band && referencePx > 0) {
+    if (!isExit && band && referencePx > 0) {
       if (referencePx < band.min || referencePx > band.max) {
         reasons.push('price-band');
       }
     }
 
     const ts = now();
-    orderLog = orderLog.filter((entry) => ts - entry.ts <= limits.throttle.windowMs);
-    if (orderLog.length >= limits.throttle.maxCount) {
-      reasons.push('throttle');
-    } else {
-      orderLog.push({ ts });
+    if (!isExit) {
+      orderLog = orderLog.filter((entry) => ts - entry.ts <= limits.throttle.windowMs);
+      if (orderLog.length >= limits.throttle.maxCount) {
+        reasons.push('throttle');
+      } else {
+        orderLog.push({ ts });
+      }
     }
 
-    if (accountGuard && !marketExposureGuard) {
+    if (!isExit && accountGuard && !marketExposureGuard) {
       const venue = accountGuard.venue;
       if (order.side === 'BUY' && referencePx > 0) {
         const availableQuote = accountGuard.getAvailable(venue, accountGuard.quoteAsset);
@@ -118,7 +122,7 @@ export const createPreTradeRisk = (
       }
     }
 
-    if (marketExposureGuard) {
+    if (!isExit && marketExposureGuard) {
       if (!marketExposureGuard.canAccept(order, notionalWithFees)) {
         reasons.push('insufficient-balance');
       }

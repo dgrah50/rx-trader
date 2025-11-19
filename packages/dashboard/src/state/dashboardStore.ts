@@ -8,7 +8,8 @@ import type {
   OrderEvent,
   PnlResponse,
   PositionsResponse,
-  StatusResponse
+  StatusResponse,
+  TradesResponse
 } from '../types';
 
 interface DashboardState {
@@ -21,6 +22,7 @@ interface DashboardState {
   recentEvents: EventMessage[];
   accountBalances: AccountBalancesResponse | null;
   accountMargin: AccountMarginResponse | null;
+  trades: TradesResponse | null;
   setPnl: (pnl: PnlResponse | null) => void;
   setPositions: (positions: PositionsResponse | null) => void;
   setPublishedArtifact: (artifact: BacktestArtifact | null) => void;
@@ -30,6 +32,7 @@ interface DashboardState {
   setRecentEvents: (events: EventMessage[]) => void;
   setAccountBalances: (balances: AccountBalancesResponse | null) => void;
   setAccountMargin: (margin: AccountMarginResponse | null) => void;
+  setTrades: (trades: TradesResponse | null) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set) => ({
@@ -42,6 +45,7 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   recentEvents: [],
   accountBalances: null,
   accountMargin: null,
+  trades: null,
   setPnl: (pnl) => set({ pnl }),
   setPositions: (positions) => set({ positions }),
   setPublishedArtifact: (publishedArtifact) => set({ publishedArtifact }),
@@ -50,5 +54,6 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   setRecentOrders: (recentOrders) => set({ recentOrders }),
   setRecentEvents: (recentEvents) => set({ recentEvents }),
   setAccountBalances: (accountBalances) => set({ accountBalances }),
-  setAccountMargin: (accountMargin) => set({ accountMargin })
+  setAccountMargin: (accountMargin) => set({ accountMargin }),
+  setTrades: (trades) => set({ trades })
 }));

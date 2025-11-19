@@ -25,7 +25,7 @@ import type { BalanceProvider } from '@rx-trader/portfolio';
 import type { InstrumentMetadata } from '@rx-trader/pipeline';
 import type { StrategySignal } from '@rx-trader/strategies';
 
-const runE2E = process.env.RUN_E2E_TESTS === 'true';
+const runE2E = process.env.RUN_E2E_TESTS !== 'false';
 const debugE2E = process.env.DEBUG_E2E === 'true';
 const debugLog = (...args: unknown[]) => {
   if (debugE2E) {
@@ -82,18 +82,24 @@ maybeDescribe('runtime end-to-end integration', () => {
       SQLITE_PATH: sqlitePath,
       MARKET_STRUCTURE_SQLITE_PATH: sqlitePath,
       GATEWAY_PORT: String(randomPort),
-      STRATEGY_TYPE: 'arbitrage',
-      STRATEGY_TRADE_SYMBOL: 'BTCUSDT',
-      STRATEGY_PRIMARY_FEED: FeedType.Binance,
-      STRATEGY_EXTRA_FEEDS: FeedType.Hyperliquid,
-      STRATEGY_PARAMS: JSON.stringify({
-        primaryVenue: FeedType.Binance,
-        secondaryVenue: FeedType.Hyperliquid,
-        spreadBps: 5,
-        maxAgeMs: 5000,
-        minIntervalMs: 0,
-        priceSource: 'bid'
-      }),
+      STRATEGIES: JSON.stringify([
+        {
+          id: 'arb-demo',
+          type: 'ARBITRAGE',
+          tradeSymbol: 'BTCUSDT',
+          primaryFeed: FeedType.Binance,
+          extraFeeds: [FeedType.Hyperliquid],
+          params: {
+            primaryVenue: FeedType.Binance,
+            secondaryVenue: FeedType.Hyperliquid,
+            spreadBps: 5,
+            maxAgeMs: 5000,
+            minIntervalMs: 0,
+            priceSource: 'bid'
+          },
+          exit: { enabled: false }
+        }
+      ]),
       ACCOUNT_ID: 'E2E',
       INTENT_MODE: 'makerPreferred',
       INTENT_NOTIONAL_USD: '100',
@@ -288,12 +294,12 @@ maybeDescribe('runtime end-to-end integration', () => {
     strategySignal$.next({ symbol: 'BTCUSDT', action: 'BUY', px: 101.7, t: manualClock.now() });
     strategySignal$.complete();
     const order = (await orderEventPromise).data as OrderNew;
-    expect(order.meta?.expectedFeeBps).toBe(8);
+    expect(Number(order.meta?.expectedFeeBps)).toBe(8);
     expect(order.meta?.feeSource).toBe('test');
     manualClock.advance(1);
     const fillPx = order.px ?? 101.7;
     const fillQty = order.qty ?? 1;
-    const feeBps = order.meta?.expectedFeeBps ?? 0;
+    const feeBps = Number(order.meta?.expectedFeeBps ?? 0);
     const feeAmount = Math.abs((fillPx * fillQty * feeBps) / 10_000);
     const fill: Fill = {
       id: randomUUID(),

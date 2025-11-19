@@ -10,53 +10,56 @@ interface AccountBalancesCardProps {
 }
 
 export const AccountBalancesCard = ({ balances, updated, balanceSync }: AccountBalancesCardProps) => (
-  <Card>
-    <CardHeader className="flex flex-col gap-2">
-      <div>
-        <CardDescription>Account</CardDescription>
-        <CardTitle className="text-xl">Balances</CardTitle>
+  <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+    <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Balances</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+          {balances.length}
+        </span>
       </div>
-      <div className="text-xs text-muted-foreground">
-        {balances.length} holdings · Updated {formatAgo(updated)}
-        {balanceSync ? (
-          <span className="block text-muted-foreground/80">
-            Last sync {formatAgo(balanceSync.lastSuccessMs ?? null)} via {balanceSync.provider}
-          </span>
-        ) : null}
+      <div className="text-[10px] text-muted-foreground text-right">
+        <div>Updated {formatAgo(updated)}</div>
+        {balanceSync && (
+          <div className="text-muted-foreground/60">
+            Sync: {formatAgo(balanceSync.lastSuccessMs ?? null)} ({balanceSync.provider})
+          </div>
+        )}
       </div>
-    </CardHeader>
-    <CardContent>
+    </div>
+
+    <div className="flex-1 overflow-auto min-h-0 -mx-1">
       {balanceSync?.lastError ? (
-        <p className="mb-2 text-xs text-amber-500">Balance sync error: {balanceSync.lastError.message}</p>
+        <p className="mb-2 px-1 text-[10px] text-amber-500">Sync error: {balanceSync.lastError.message}</p>
       ) : null}
       {balances.length ? (
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Venue</TableHead>
-                <TableHead>Asset</TableHead>
-                <TableHead className="text-right">Available</TableHead>
-                <TableHead className="text-right">Locked</TableHead>
-                <TableHead className="text-right">Total</TableHead>
+        <Table>
+          <TableHeader className="sticky top-0 bg-background z-10">
+            <TableRow className="hover:bg-transparent border-b border-border/40">
+              <TableHead className="h-6 text-[10px] uppercase">Venue</TableHead>
+              <TableHead className="h-6 text-[10px] uppercase">Asset</TableHead>
+              <TableHead className="h-6 text-[10px] uppercase text-right">Free</TableHead>
+              <TableHead className="h-6 text-[10px] uppercase text-right">Lock</TableHead>
+              <TableHead className="h-6 text-[10px] uppercase text-right">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {balances.map((row) => (
+              <TableRow key={`${row.venue}-${row.asset}`} className="border-b border-border/20 hover:bg-muted/30">
+                <TableCell className="py-1 text-xs font-medium">{row.venue}</TableCell>
+                <TableCell className="py-1 text-xs font-medium">{row.asset}</TableCell>
+                <TableCell className="py-1 text-xs text-right font-mono">{formatNumber(row.available)}</TableCell>
+                <TableCell className="py-1 text-xs text-right font-mono text-muted-foreground">{formatNumber(row.locked)}</TableCell>
+                <TableCell className="py-1 text-xs text-right font-mono font-medium">{formatNumber(row.total)}</TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {balances.map((row) => (
-                <TableRow key={`${row.venue}-${row.asset}`}>
-                  <TableCell className="font-semibold">{row.venue}</TableCell>
-                  <TableCell>{row.asset}</TableCell>
-                  <TableCell className="text-right">{formatNumber(row.available)}</TableCell>
-                  <TableCell className="text-right">{formatNumber(row.locked)}</TableCell>
-                  <TableCell className="text-right">{formatNumber(row.total)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+            ))}
+          </TableBody>
+        </Table>
       ) : (
-        <p className="text-sm text-muted-foreground">No balance events recorded yet.</p>
+        <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
+          No balance events.
+        </div>
       )}
-    </CardContent>
+    </div>
   </Card>
 );

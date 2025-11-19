@@ -46,6 +46,30 @@ graph LR
 
 --
 
+## Tick-to-Trade Path
+1. **Tick ingestion & normalization** – `FeedManager` fans in Binance, Hyperliquid, sentiment, and historical/backtest feeds. Every raw payload is parsed, symbol IDs are normalized via the market‑structure package, and redundant ticks are eliminated (sequence+timestamp guards) before hitting the hot observable.
+2. **Signal + fair value generation** – Strategies subscribe to the normalized tick stream (plus optional secondary feeds) and compose DSL operators such as `priceSeries`, `sma`, `rollingZScore`, `pairSpread`, and `cooldown`. The result is a deterministic stream of `StrategySignal` objects describing desired exposure deltas plus telemetry (alpha, confidence, diagnostics).
+3. **Exit engine overlay** – Positions, PnL, microstructure, and risk projections replayed from the event store feed into the `ExitEngine`. Time stops, TP/SL sigma bands, trailing stops, fair‑value reversion, and portfolio overrides emit `exitIntent` events that share the same downstream path as entry intents.
+4. **Intent shaping & risk** – `IntentBuilder` turns signals/exits into trade intents (side, quantity, edge) and tags them with references (strategy ID, feed timestamp, analytics). Pre‑trade risk modules clamp positions, enforce notional caps, per‑venue throttles, leverage budgets, and configurable margin constraints. Rejected intents turn into structured events (reason codes like `throttle`, `margin`, `maxPosition`).
+5. **Execution** – The execution manager merges approved intents with per‑venue fee curves, maker/taker preference, and mode (live vs. dry run). It publishes serialized orders to venue adapters (REST/WS for Binance/Hyperliquid) or the paper adapter. Acks/fills are observed immediately; retries/backoffs live inside each adapter with jittered reconnects so the pipeline never blocks.
+6. **Feedback loop** – Orders, fills, rejects, and balance delta events feed portfolio/risk projections, the dashboard, CLI telemetry (`rx status`), and alerting sinks. Benchmarks (`rx bench`) wrap the entire loop—JSON parse → signal → intent → risk → execution serialize → (mock) venue ack—to measure tick‑to‑trade latency distributions while optionally forcing persistence flushes.
+
+The entire flow runs in one Bun process; observables keep the codepath hot, while dedicated workers handle I/O that would otherwise stall the event loop.
+
+--
+
+## Persistence & Replay
+- **Shared-memory queue** – The runtime never blocks on database writes. Every intent/order/fill/log gets appended to a `SharedArrayBuffer` ring buffer. When it nears capacity the pipeline emits a warning and (optionally) falls back to inline writes.
+- **Persistence worker** – `scripts/persistence-worker.ts` drains the queue in its own Bun Worker, batches events, and writes them through the selected driver (default SQLite via `rxtrader.sqlite`; memory for tests; Postgres remains available for legacy runs). Because the worker runs outside the main thread, DB fsyncs and migrations no longer inflate tick‑to‑trade latency.
+- **Event store** – `packages/event-store` defines the append/read API, stream categories (`tick`, `signal`, `intent`, `order`, `fill`, `snapshot`, `analytics`), migrations (Drizzle), and projection helpers. Append latency, queue depth, and worker health are exposed via the `/metrics` endpoint for Prometheus/Grafana.
+- **Projections & snapshots** – `buildProjection` describes how to fold events into portfolio, PnL, trade journal, and balance views. Snapshots are emitted periodically and on clean shutdown; replay on startup hydrates the latest state before the first tick arrives. CLI commands (`rx snapshot:positions`, `rx recover:positions`, `rx replay`) reuse the same code paths for maintenance and DR.
+- **Backtests & demos** – Historical runs use the exact event flow: when `rx backtest` replays a dataset, it still produces intents/orders/fills that append to the store and can be inspected via the dashboard or CLI. The `env:demo` command seeds SQLite, spawns the persistence worker, and makes the dashboard consume projections built off the stored events—no hidden mocks.
+- **Control-plane & UI** – `/positions`, `/pnl`, `/trades`, `/events`, and the SSE feeds simply read projections or tail the append log. Because every view is a replay, any drift between metrics (dashboard vs. CLI vs. logs) signals a real data issue, not divergent code paths.
+
+Persistence is therefore part of the production contract: if an event hits risk/execution, it is durably recorded, replayable, and visible through the control plane.
+
+--
+
 ## Packages
 - `packages/core` – Domain schemas (Zod) and constants for ticks, orders, events, portfolio, time.
 - `packages/feeds` – Live WebSocket adapters (Binance, Hyperliquid) and a sentiment/demo feed.
@@ -122,9 +146,16 @@ Three layers (later overrides earlier):
 Example `rx.config.json`:
 ```json
 {
-  "strategy_type": "PAIR",
-  "strategy_trade_symbol": "BTCUSDT",
-  "strategy_primary_feed": "BINANCE",
+  "strategies": [
+    {
+      "id": "btc-momo",
+      "type": "MOMENTUM",
+      "tradeSymbol": "BTCUSDT",
+      "primaryFeed": "BINANCE",
+      "params": { "fastWindow": 5, "slowWindow": 20 },
+      "exit": { "enabled": false }
+    }
+  ],
   "risk_max_position": 1,
   "risk_notional_limit": 1000000,
   "intent_mode": "market",
@@ -152,6 +183,7 @@ Set the `strategies` array (or `STRATEGIES` env var containing JSON) to register
       "tradeSymbol": "BTCUSDT",
       "primaryFeed": "BINANCE",
       "params": { "fastWindow": 5, "slowWindow": 20 },
+      "exit": { "enabled": true, "time": { "enabled": true, "maxHoldMs": 300000 } },
       "priority": 10,
       "mode": "live",
       "budget": {
@@ -166,6 +198,7 @@ Set the `strategies` array (or `STRATEGIES` env var containing JSON) to register
       "tradeSymbol": "ETHUSDT",
       "primaryFeed": "BINANCE",
       "extraFeeds": ["HYPERLIQUID"],
+      "exit": { "enabled": false },
       "mode": "sandbox",
       "priority": 5
     }
@@ -176,10 +209,10 @@ Any missing budget fields inherit the global `risk_*` limits, and sandboxed stra
 
 Each strategy publishes telemetry (signals, intents, orders, fills, rejects, last-activity timestamps) that surfaces via `GET /status` (`runtime.strategies[]`) and powers the dashboard Strategy Mixer + CLI/ops tooling.
 
-> ℹ️ **Legacy env knobs:** the `STRATEGY_*` environment variables still exist, but they now only define the fallback entry in `config.strategies` when `STRATEGIES` is empty. Put real configurations in the `STRATEGIES` array (JSON string or `rx.config.json`) so everything—CLI, runtime, dashboard—reads from a single list.
-
 ### Strategy exit rules
 Give every strategy an `exit` block to describe when positions should be flattened. The schema supports TP/SL bands (in sigma units), fair-value epsilon checks, time stops, trailing stops, and portfolio overrides (gross/symbol exposure, drawdown, margin buffers). Runtime config validation lives in `exitConfigSchema`, so missing/invalid fields fail fast, and defaults (`tpSigma=1.5`, `slSigma=1`, `epsilonBps=5`, etc.) are injected automatically.
+
+> **Required:** Each strategy entry in the `strategies` array must include an `exit` object. Set `{ "enabled": false }` if you want to keep exits disabled, otherwise specify the rules you need.
 
 ```json
 "exit": {
@@ -222,8 +255,8 @@ At runtime the execution policy automatically uses the stored fees per venue/sym
 ```
 bun x tsc --noEmit           # typecheck
 bun x eslint .               # lint
-bun test                     # unit + integration suites
-RUN_REAL_FEED_TESTS=true bun test packages/feeds/src/binance.real.test.ts
+bun test                     # unit + integration suites (real feed tests run by default; set RUN_REAL_FEED_TESTS=false to skip)
+bun test packages/feeds/src/binance.real.test.ts # run just the Binance real feed test
 bun x knip --no-config-hints # dead-code analysis (dashboard allowlisted)
 ```
 

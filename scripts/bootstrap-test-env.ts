@@ -38,18 +38,26 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
       qty: number;
       avgPx: number;
       mark?: number;
-      realized: number;
+      netRealized: number;
+      grossRealized: number;
     }
   > = {};
   let cash = 0;
-  let realized = 0;
+  let netRealized = 0;
+  let grossRealized = 0;
 
   fills.forEach((fill) => {
     const signedQty = fill.side === 'BUY' ? fill.qty : -fill.qty;
-    const current = positions[fill.symbol] ?? { qty: 0, avgPx: 0, realized: 0 };
+    const current = positions[fill.symbol] ?? {
+      qty: 0,
+      avgPx: 0,
+      netRealized: 0,
+      grossRealized: 0
+    };
     const nextQty = current.qty + signedQty;
     let nextAvg = current.avgPx;
-    let realizedForSymbol = current.realized;
+    let realizedForSymbol = current.netRealized;
+    let realizedGrossForSymbol = current.grossRealized;
 
     if (Math.sign(current.qty) === Math.sign(nextQty) || current.qty === 0) {
       const gross = current.avgPx * current.qty + fill.px * signedQty;
@@ -57,8 +65,10 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
     } else if (current.qty !== 0) {
       const closed = Math.min(Math.abs(signedQty), Math.abs(current.qty));
       const pnl = closed * (fill.px - current.avgPx) * Math.sign(current.qty);
-      realized += pnl;
+      netRealized += pnl;
+      grossRealized += pnl;
       realizedForSymbol += pnl;
+      realizedGrossForSymbol += pnl;
       if (nextQty === 0) {
         nextAvg = 0;
       } else if (Math.sign(current.qty) !== Math.sign(nextQty)) {
@@ -66,22 +76,31 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
       }
     }
 
-    positions[fill.symbol] = { qty: nextQty, avgPx: nextAvg, mark: fill.px, realized: realizedForSymbol };
+    positions[fill.symbol] = {
+      qty: nextQty,
+      avgPx: nextAvg,
+      mark: fill.px,
+      netRealized: realizedForSymbol,
+      grossRealized: realizedGrossForSymbol
+    };
     cash -= fill.px * signedQty;
   });
 
   const marks = Object.entries(positions).reduce<PortfolioSnapshot['positions']>(
     (acc, [symbol, position]) => {
       const px = position.mark ?? position.avgPx;
-      const symbolRealized = position.realized ?? 0;
+      const symbolRealized = position.netRealized ?? 0;
+      const symbolGross = position.grossRealized ?? 0;
       acc[symbol] = {
         symbol,
         pos: position.qty,
         px,
         avgPx: position.avgPx,
         unrealized: (px - position.avgPx) * position.qty,
-        realized: symbolRealized,
+        netRealized: symbolRealized,
+        grossRealized: symbolGross,
         notional: px * position.qty,
+        pnl: symbolRealized + (px - position.avgPx) * position.qty,
         t: Date.now()
       };
       return acc;
@@ -94,15 +113,16 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
     return acc + (position.mark - position.avgPx) * position.qty;
   }, 0);
 
-  const nav = cash + realized + unrealized;
+  const nav = cash + netRealized + unrealized;
   const feesPaid = fills.reduce((sum, fill) => sum + (fill.fee ?? 0), 0);
 
   return {
     t: Date.now(),
     positions: marks,
     nav,
-    pnl: realized + unrealized,
-    realized,
+    pnl: netRealized + unrealized,
+    netRealized,
+    grossRealized,
     unrealized,
     cash,
     feesPaid
@@ -126,7 +146,9 @@ const main = async () => {
     t: snapshot.t,
     nav: snapshot.nav,
     pnl: snapshot.pnl,
-    realized: snapshot.realized,
+    realized: snapshot.netRealized,
+    netRealized: snapshot.netRealized,
+    grossRealized: snapshot.grossRealized,
     unrealized: snapshot.unrealized,
     cash: snapshot.cash,
     peakNav: snapshot.nav,
@@ -136,15 +158,17 @@ const main = async () => {
     symbols: Object.fromEntries(
       Object.entries(snapshot.positions).map(([symbol, position]) => [
         symbol,
-        {
-          symbol,
-          pos: position.pos,
-          avgPx: position.avgPx,
-          markPx: position.px,
-          realized: position.realized,
-          unrealized: position.unrealized,
-          notional: position.notional
-        }
+          {
+            symbol,
+            pos: position.pos,
+            avgPx: position.avgPx,
+            markPx: position.px,
+            realized: position.netRealized,
+            netRealized: position.netRealized,
+            grossRealized: position.grossRealized ?? 0,
+            unrealized: position.unrealized,
+            notional: position.notional
+          }
       ])
     )
   };

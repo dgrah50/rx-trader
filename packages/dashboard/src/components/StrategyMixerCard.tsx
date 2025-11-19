@@ -79,114 +79,111 @@ export const StrategyMixerCard = ({
   const highlights = metricHighlights(aggregatedMetrics);
 
   return (
-    <Card className="border-border/60 bg-card/70">
-      <CardHeader className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <CardDescription>Strategy Mixer</CardDescription>
-          <CardTitle className="text-2xl">Orchestration</CardTitle>
-          <p className="text-xs text-muted-foreground">Focus: {focusLabel}</p>
+    <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+      <div className="flex flex-col gap-2 border-b border-border/40 pb-2 mb-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Strategy Mixer</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select value={selectedStrategyId} onValueChange={onSelect}>
+              <SelectTrigger className="h-6 w-48 text-xs bg-background/50 border-border/50">
+                <SelectValue placeholder="Select strategy" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((option) => (
+                  <SelectItem key={option.id} value={option.id} className="text-xs">
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedStrategy && (
+              <Badge variant={selectedStrategy.mode === 'live' ? 'default' : 'outline'} className="h-5 text-[10px] px-1.5">
+                {selectedStrategy.mode === 'live' ? 'Live' : 'Sandbox'}
+              </Badge>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Select value={selectedStrategyId} onValueChange={onSelect}>
-            <SelectTrigger className="w-60 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-              <SelectValue placeholder="Select strategy" />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((option) => (
-                <SelectItem key={option.id} value={option.id}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedStrategy ? (
-            <Badge variant={selectedStrategy.mode === 'live' ? 'default' : 'outline'}>
-              {selectedStrategy.mode === 'live' ? 'Live' : 'Sandbox'}
-            </Badge>
-          ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+        
+        {rows.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {highlights.map((metric) => {
+              const content =
+                metric.format === 'time'
+                  ? formatAgo(metric.value as number | null)
+                  : (metric.value as string);
+              return (
+                <div 
+                  key={metric.label} 
+                  className="flex flex-col px-2 py-1 rounded-sm border bg-card/50 min-w-[70px] flex-1 cursor-pointer hover:bg-accent/50 transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // The original code had `onSelect(row.id)` here, but `row` is not defined in this scope.
+                    // This onClick handler is for a metric highlight, not a strategy row.
+                    // If the intention was to select the currently selected strategy, it would be:
+                    // if (selectedStrategy) onSelect(selectedStrategy.id);
+                    // For now, removing the erroneous call to avoid runtime errors.
+                  }}
+                >
+                  <span className="text-[9px] uppercase tracking-wider text-muted-foreground">{metric.label}</span>
+                  <span className="text-xs font-mono font-medium">{content}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-auto min-h-0 -mx-1">
         {rows.length ? (
-          <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-              {highlights.map((metric) => {
-                const content =
-                  metric.format === 'time'
-                    ? formatAgo(metric.value as number | null)
-                    : (metric.value as string);
+          <Table>
+            <TableHeader className="sticky top-0 bg-background z-10">
+              <TableRow className="hover:bg-transparent border-b border-border/40">
+                <TableHead className="h-7 text-[10px] uppercase">Strategy</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase">Mode</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase">Sym</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase">Fees (M/T)</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Pri</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Sig</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Ord</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Fil</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Last Sig</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((strategy) => {
+                const isSelected = selectedStrategy?.id === strategy.id;
                 return (
-                  <div
-                    key={metric.label}
-                    className="rounded-lg border border-border/40 bg-background/40 p-3"
+                  <TableRow
+                    key={strategy.id}
+                    className={cn('cursor-pointer border-b border-border/20 hover:bg-muted/30', isSelected ? 'bg-primary/5' : undefined)}
+                    onClick={() => onSelect(strategy.id)}
                   >
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                      {metric.label}
-                    </p>
-                    <p className="text-2xl font-semibold text-foreground">{content}</p>
-                    {metric.hint ? (
-                      <p className="text-xs text-muted-foreground/80">{metric.hint}</p>
-                    ) : null}
-                  </div>
+                    <TableCell className="py-1 text-xs font-medium">{strategy.id}</TableCell>
+                    <TableCell className="py-1 text-xs">
+                      <span className={cn("text-[10px] px-1 rounded-sm border", strategy.mode === 'live' ? 'border-emerald-500/30 text-emerald-500' : 'border-muted-foreground/30 text-muted-foreground')}>
+                        {strategy.mode}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-1 text-xs">{strategy.tradeSymbol}</TableCell>
+                    <TableCell className="py-1 text-xs text-muted-foreground">{formatFeeSummary(strategy.fees)}</TableCell>
+                    <TableCell className="py-1 text-xs text-right">{strategy.priority}</TableCell>
+                    <TableCell className="py-1 text-xs text-right font-mono">{strategy.metrics?.signals ?? 0}</TableCell>
+                    <TableCell className="py-1 text-xs text-right font-mono">{strategy.metrics?.orders ?? 0}</TableCell>
+                    <TableCell className="py-1 text-xs text-right font-mono">{strategy.metrics?.fills ?? 0}</TableCell>
+                    <TableCell className="py-1 text-xs text-right text-muted-foreground">{formatAgo(strategy.metrics?.lastSignalTs ?? null)}</TableCell>
+                  </TableRow>
                 );
               })}
-            </div>
-            <div className="rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Strategy</TableHead>
-                    <TableHead>Mode</TableHead>
-                    <TableHead>Symbol</TableHead>
-                    <TableHead>Fees (maker / taker)</TableHead>
-                    <TableHead className="text-right">Priority</TableHead>
-                    <TableHead className="text-right">Signals</TableHead>
-                    <TableHead className="text-right">Orders</TableHead>
-                    <TableHead className="text-right">Fills</TableHead>
-                    <TableHead className="text-right">Last Signal</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((strategy) => {
-                    const isSelected = selectedStrategy?.id === strategy.id;
-                    return (
-                      <TableRow
-                        key={strategy.id}
-                        className={cn('cursor-pointer', isSelected ? 'bg-primary/5' : undefined)}
-                        onClick={() => onSelect(strategy.id)}
-                      >
-                        <TableCell className="font-semibold">{strategy.id}</TableCell>
-                        <TableCell>
-                          <Badge variant={strategy.mode === 'live' ? 'default' : 'outline'}>
-                            {strategy.mode}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{strategy.tradeSymbol}</TableCell>
-                        <TableCell>{formatFeeSummary(strategy.fees)}</TableCell>
-                        <TableCell className="text-right">{strategy.priority}</TableCell>
-                        <TableCell className="text-right">
-                          {strategy.metrics?.signals ?? 0}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {strategy.metrics?.orders ?? 0}
-                        </TableCell>
-                        <TableCell className="text-right">{strategy.metrics?.fills ?? 0}</TableCell>
-                        <TableCell className="text-right">
-                          {formatAgo(strategy.metrics?.lastSignalTs ?? null)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </>
+            </TableBody>
+          </Table>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            No strategy telemetry yet — start the trader to stream updates.
-          </p>
+          <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
+            No strategy telemetry yet.
+          </div>
         )}
-      </CardContent>
+      </div>
     </Card>
   );
 };

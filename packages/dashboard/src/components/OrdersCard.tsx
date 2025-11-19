@@ -1,5 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import type { StrategyRuntimeStatus } from '../types';
 
 interface OrderSummary {
@@ -23,64 +24,63 @@ interface OrdersCardProps {
 
 export const OrdersCard = ({ orders, selectedStrategy, formatNumber }: OrdersCardProps) => {
   const subtitle = selectedStrategy
-    ? `Filtered to ${selectedStrategy.id} (${selectedStrategy.tradeSymbol})`
+    ? `Filtered to ${selectedStrategy.id}`
     : `Last ${orders.length} events`;
 
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-2">
-        <div>
-          <CardDescription>Orders</CardDescription>
-          <CardTitle className="text-xl">Recent Activity</CardTitle>
+    <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+      <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent Orders</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+            {orders.length}
+          </span>
         </div>
-        <div className="text-xs text-muted-foreground">{subtitle}</div>
-      </CardHeader>
-      <CardContent>
+        <span className="text-[10px] text-muted-foreground">{subtitle}</span>
+      </div>
+      
+      <div className="flex-1 overflow-auto min-h-0 -mx-1">
         {orders.length ? (
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Strategy</TableHead>
-                  <TableHead>Symbol</TableHead>
-                  <TableHead className="text-right">Side</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Px</TableHead>
+          <Table>
+            <TableHeader className="sticky top-0 bg-background z-10">
+              <TableRow className="hover:bg-transparent border-b border-border/40">
+                <TableHead className="h-7 text-[10px] uppercase">Time</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase">Type</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase">Sym</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Side</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Qty</TableHead>
+                <TableHead className="h-7 text-[10px] uppercase text-right">Px</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orders.map((order) => (
+                <TableRow key={order.id} className="border-b border-border/20 hover:bg-muted/30">
+                  <TableCell className="py-1 text-[10px] text-muted-foreground font-mono">
+                    {new Date(order.ts).toLocaleTimeString()}
+                  </TableCell>
+                  <TableCell className="py-1 text-xs font-medium">
+                    {order.type.replace('order.', '')}
+                  </TableCell>
+                  <TableCell className="py-1 text-xs">{order.summary.symbol}</TableCell>
+                  <TableCell className={cn("py-1 text-xs text-right font-medium", order.summary.side === 'Buy' ? 'text-emerald-400' : order.summary.side === 'Sell' ? 'text-rose-400' : '')}>
+                    {order.summary.side || '—'}
+                  </TableCell>
+                  <TableCell className="py-1 text-xs text-right font-mono">
+                    {order.summary.qty == null ? '—' : formatNumber(order.summary.qty, 4)}
+                  </TableCell>
+                  <TableCell className="py-1 text-xs text-right font-mono">
+                    {order.summary.px == null ? '—' : formatNumber(order.summary.px, 2)}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {new Date(order.ts).toLocaleTimeString()}
-                    </TableCell>
-                    <TableCell className="font-semibold">{order.type.replace('order.', '')}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {order.summary.strategyId ?? '—'}
-                    </TableCell>
-                    <TableCell>{order.summary.symbol}</TableCell>
-                    <TableCell className="text-right">{order.summary.side || '—'}</TableCell>
-                    <TableCell className="text-right">
-                      {order.summary.qty == null ? '—' : formatNumber(order.summary.qty, 4)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {order.summary.px == null ? '—' : formatNumber(order.summary.px, 2)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+              ))}
+            </TableBody>
+          </Table>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            {selectedStrategy
-              ? `No order activity for ${selectedStrategy.id}.`
-              : 'No order activity yet.'}
-          </p>
+          <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
+            No order activity yet.
+          </div>
         )}
-      </CardContent>
+      </div>
     </Card>
   );
 };

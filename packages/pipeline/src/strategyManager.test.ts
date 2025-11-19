@@ -19,10 +19,12 @@ const makeFeedManager = () => ({
       adapter: {
         id: 'primary-adapter',
         feed$: new Subject<MarketTick>().asObservable(),
-        connect: vi.fn()
+        connect: vi.fn(),
+        disconnect: vi.fn()
       }
     }
-  ]
+  ],
+  stop: vi.fn()
 });
 
 describe('createStrategy$', () => {
@@ -38,7 +40,8 @@ describe('createStrategy$', () => {
         tradeSymbol: 'BTCUSDT',
         primaryFeed: FeedType.Binance,
         extraFeeds: [],
-        params: {}
+        params: {},
+        exit: { enabled: false }
       },
       feedManager,
       resolveStrategy: () => ({
@@ -81,7 +84,8 @@ describe('createStrategy$', () => {
         tradeSymbol: 'BTCUSDT',
         primaryFeed: FeedType.Binance,
         extraFeeds: [],
-        params: {}
+        params: {},
+        exit: { enabled: false }
       },
       feedManager,
       onExternalFeedTick: externalTick,

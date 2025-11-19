@@ -48,13 +48,21 @@ const makeDefinition = (overrides: Partial<StrategyDefinition> = {}): StrategyDe
     notional: 100000,
     maxPosition: 5,
     throttle: { windowMs: 1000, maxCount: 2 }
-  }
+  },
+  exit: overrides.exit ?? { enabled: false }
 });
 
 const makeFeedManager = (symbol: string): FeedManagerResult => ({
   marks$: of({ symbol, t: Date.now(), last: 100 } as any),
-  sources: []
+  sources: [],
+  stop: () => {}
 });
+
+import { EventBus } from '@rx-trader/core';
+
+// ... existing imports
+
+// ... existing setup
 
 describe('createStrategyOrchestrator', () => {
   const signalStream = of<StrategySignal>({
@@ -81,12 +89,14 @@ describe('createStrategyOrchestrator', () => {
 
   it('emits intents for live strategies', async () => {
     const strategies: RuntimeStrategyConfig[] = [{ definition: makeDefinition({ id: 'live' }) }];
+    const eventBus = new EventBus();
 
     const orchestrator = createStrategyOrchestrator({
       strategies,
       executionAccount: 'TEST',
       executionPolicy: basePolicy,
       baseRisk,
+      eventBus,
       createFeedManager: () => makeFeedManager('BTCUSDT'),
       createStrategy$: () => signalStream,
       createIntentBuilder: intentBuilderStub
@@ -102,12 +112,14 @@ describe('createStrategyOrchestrator', () => {
     const strategies: RuntimeStrategyConfig[] = [
       { definition: makeDefinition({ id: 'sandbox', mode: 'sandbox' }) }
     ];
+    const eventBus = new EventBus();
 
     const orchestrator = createStrategyOrchestrator({
       strategies,
       executionAccount: 'TEST',
       executionPolicy: basePolicy,
       baseRisk,
+      eventBus,
       createFeedManager: () => makeFeedManager('BTCUSDT'),
       createStrategy$: () => signalStream,
       createIntentBuilder: intentBuilderStub

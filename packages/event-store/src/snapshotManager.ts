@@ -6,9 +6,23 @@ import type { BalanceEntry } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
 
+type SnapshotPosition = {
+  symbol?: string;
+  pos?: number;
+  avgPx?: number;
+  px?: number;
+  t?: number;
+  realized?: number;
+  netRealized?: number;
+  grossRealized?: number;
+  unrealized?: number;
+  notional?: number;
+  pnl?: number;
+};
+
 export interface PositionsSnapshot {
   ts: number;
-  positions: Record<string, { pos: number; avgPx: number; px: number; pnl?: number }>;
+  positions: Record<string, SnapshotPosition>;
   balances?: Record<string, Record<string, BalanceEntry>>;
   clock?: SnapshotClockMetadata;
 }

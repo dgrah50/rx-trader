@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { firstValueFrom, retry, take, timeout } from 'rxjs';
 import { HyperliquidFeedAdapter } from './hyperliquid';
 
-const runReal = process.env.RUN_REAL_FEED_TESTS === 'true';
+const runReal = process.env.RUN_REAL_FEED_TESTS !== 'false';
 const maybe = runReal ? describe : describe.skip;
 
 maybe('HyperliquidFeedAdapter (real WS)', () => {

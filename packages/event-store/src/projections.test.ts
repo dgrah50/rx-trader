@@ -14,28 +14,33 @@ const snapshotEvent = (overrides: Partial<any> = {}) => ({
   id: crypto.randomUUID(),
   type: 'portfolio.snapshot' as const,
   ts: Date.now(),
-  data: {
-    t: Date.now(),
-    positions: {
-      SIM: {
+      data: {
         t: Date.now(),
-        symbol: 'SIM',
-        pos: 1,
-        px: 101,
-        avgPx: 100,
-        unrealized: 1,
+        positions: {
+          SIM: {
+            t: Date.now(),
+            symbol: 'SIM',
+            pos: 1,
+            px: 101,
+            avgPx: 100,
+            unrealized: 1,
+            realized: 0,
+            netRealized: 0,
+            grossRealized: 0,
+            notional: 101,
+            pnl: 1
+          }
+        },
+        nav: 101,
+        pnl: 1,
         realized: 0,
-        notional: 101
+        netRealized: 0,
+        grossRealized: 0,
+        unrealized: 1,
+        cash: 0,
+        feesPaid: 0,
+        ...overrides
       }
-    },
-    nav: 101,
-    pnl: 1,
-    realized: 0,
-    unrealized: 1,
-    cash: 0,
-    feesPaid: 0,
-    ...overrides
-  }
 });
 
 describe('positionsProjection', () => {
@@ -61,6 +66,8 @@ describe('pnlProjection', () => {
         nav: 1000,
         pnl: 10,
         realized: 5,
+        netRealized: 5,
+        grossRealized: 5,
         unrealized: 5,
         cash: 990,
         peakNav: 1005,
@@ -74,6 +81,8 @@ describe('pnlProjection', () => {
             avgPx: 100,
             markPx: 102,
             realized: 2,
+            netRealized: 2,
+            grossRealized: 2,
             unrealized: 2,
             notional: 102
           }

@@ -72,25 +72,11 @@ const CONFIG_DOCS: Record<string, ConfigDocEntry> = {
     description: 'Optional Hyperliquid subaccount index for balance polling.',
     example: '0'
   },
-  STRATEGY_TYPE: {
-    description: 'Strategy implementation to run (momentum, pair, arbitrage, etc.).',
-    example: 'pair'
-  },
-  STRATEGY_TRADE_SYMBOL: {
-    description: 'Primary trading symbol used by the active strategy.',
-    example: 'BTCUSDT'
-  },
-  STRATEGY_PRIMARY_FEED: {
-    description: 'Feed identifier powering the main price stream (e.g., binance, hyperliquid).',
-    example: 'binance'
-  },
-  STRATEGY_EXTRA_FEEDS: {
-    description: 'Comma-separated list of auxiliary feeds consumed by multi-feed strategies.',
-    example: 'hyperliquid,sentiment'
-  },
-  STRATEGY_PARAMS: {
-    description: 'JSON blob passed directly to the selected strategy implementation.',
-    example: '{"fastWindow":5,"slowWindow":20}'
+  STRATEGIES: {
+    description:
+      'JSON array of strategy definitions (id, type, tradeSymbol, feeds, params, exit config).',
+    example:
+      '[{"id":"btc-momo","type":"MOMENTUM","tradeSymbol":"BTCUSDT","primaryFeed":"binance","exit":{"enabled":false}}]'
   },
   RISK_NOTIONAL_LIMIT: {
     description: 'Maximum USD notional per order enforced by pre-trade risk.',

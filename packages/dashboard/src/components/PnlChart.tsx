@@ -31,17 +31,45 @@ export const PnlChart = ({ points }: { points: SeriesPoint[] }) => {
           type: 'areaspline',
           name: 'PnL',
           data: points.map((point) => [point.t, point.value]),
-          color: 'rgba(34,197,94,1)',
+          color: '#00ff9d', // Green for positive
           fillColor: {
             linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
             stops: [
-              [0, 'rgba(34, 197, 94, 0.25)'],
-              [1, 'rgba(34, 197, 94, 0)']
+              [0, 'rgba(0, 255, 157, 0.25)'],
+              [1, 'rgba(0, 255, 157, 0)']
+            ]
+          },
+          negativeColor: '#ff3b30', // Red for negative
+          negativeFillColor: {
+            linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+            stops: [
+              [0, 'rgba(255, 59, 48, 0.25)'],
+              [1, 'rgba(255, 59, 48, 0)']
             ]
           },
           lineWidth: 2,
           marker: { radius: 0 },
-          threshold: 0
+          threshold: 0,
+          zones: [{
+            value: 0,
+            color: '#ff3b30',
+            fillColor: {
+              linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+              stops: [
+                [0, 'rgba(255, 59, 48, 0.25)'],
+                [1, 'rgba(255, 59, 48, 0)']
+              ]
+            }
+          }, {
+            color: '#00ff9d',
+            fillColor: {
+              linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+              stops: [
+                [0, 'rgba(0, 255, 157, 0.25)'],
+                [1, 'rgba(0, 255, 157, 0)']
+              ]
+            }
+          }]
         }
       ]
     } as Highcharts.Options;

@@ -9,53 +9,53 @@ interface MarginOverviewCardProps {
 }
 
 export const MarginOverviewCard = ({ rows, updated }: MarginOverviewCardProps) => (
-  <Card>
-    <CardHeader className="flex flex-col gap-2">
-      <div>
-        <CardDescription>Collateral</CardDescription>
-        <CardTitle className="text-xl">Margin Overview</CardTitle>
-      </div>
-      <div className="text-xs text-muted-foreground">
-        {rows.length} venues · Updated {formatAgo(updated)}
-      </div>
-    </CardHeader>
-    <CardContent className="space-y-3">
+  <Card className="h-full flex flex-col border-0 shadow-none bg-transparent">
+    <div className="flex items-center justify-between px-1 pb-2 border-b border-border/40 mb-2">
+      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Margin</span>
+      <span className="text-[10px] text-muted-foreground">Updated {formatAgo(updated)}</span>
+    </div>
+    
+    <div className="flex-1 overflow-auto min-h-0 space-y-2">
       {rows.length ? (
         rows.map((summary) => {
           const free = summary.equity - summary.marginUsed;
           return (
-            <div key={summary.venue} className="rounded-xl border border-border/50 bg-background/40 p-3">
-              <div className="flex items-center justify-between text-sm font-semibold">
-                <span>{summary.venue}</span>
-                <Badge variant="outline">{summary.collateralAsset}</Badge>
+            <div key={summary.venue} className="rounded-sm border border-border/40 bg-card/30 p-2">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold">{summary.venue}</span>
+                <Badge variant="outline" className="text-[9px] h-4 px-1">{summary.collateralAsset}</Badge>
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-                <div>
-                  <p className="uppercase tracking-wide">Equity</p>
-                  <p className="text-base font-semibold text-foreground">${formatNumber(summary.equity)}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground uppercase tracking-wider">Equity</span>
+                  <span className="font-mono font-medium">${formatNumber(summary.equity)}</span>
                 </div>
-                <div>
-                  <p className="uppercase tracking-wide">Used</p>
-                  <p className="text-base font-semibold text-foreground">${formatNumber(summary.marginUsed)}</p>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground uppercase tracking-wider">Used</span>
+                  <span className="font-mono font-medium">${formatNumber(summary.marginUsed)}</span>
                 </div>
-                <div>
-                  <p className="uppercase tracking-wide">Free</p>
-                  <p className="text-base font-semibold text-emerald-400">${formatNumber(free)}</p>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground uppercase tracking-wider">Free</span>
+                  <span className="font-mono font-medium text-emerald-400">${formatNumber(free)}</span>
                 </div>
-                <div>
-                  <p className="uppercase tracking-wide">Maintenance</p>
-                  <p className="text-base font-semibold text-foreground">${formatNumber(summary.maintenance)}</p>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground uppercase tracking-wider">Maint</span>
+                  <span className="font-mono font-medium">${formatNumber(summary.maintenance)}</span>
                 </div>
               </div>
               {summary.leverageCap ? (
-                <p className="mt-2 text-xs text-muted-foreground">Leverage cap {summary.leverageCap}×</p>
+                <div className="mt-1 text-[9px] text-muted-foreground text-right">
+                  Max Lev: {summary.leverageCap}×
+                </div>
               ) : null}
             </div>
           );
         })
       ) : (
-        <p className="text-sm text-muted-foreground">No margin snapshots yet.</p>
+        <div className="flex h-20 items-center justify-center text-xs text-muted-foreground">
+          No margin data.
+        </div>
       )}
-    </CardContent>
+    </div>
   </Card>
 );

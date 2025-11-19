@@ -32,8 +32,10 @@ interface PositionMark {
   px: number;
   avgPx: number;
   unrealized: number;
-  realized: number;
+  netRealized: number;
+  grossRealized: number;
   notional: number;
+  pnl: number;
 }
 
 export const positionMarkSchema = z.object({
@@ -43,8 +45,11 @@ export const positionMarkSchema = z.object({
   px: z.number().positive(),
   avgPx: z.number(),
   unrealized: z.number(),
-  realized: z.number(),
-  notional: z.number()
+  realized: z.number().default(0),
+  netRealized: z.number().default(0),
+  grossRealized: z.number().default(0),
+  notional: z.number(),
+  pnl: z.number()
 });
 
 export interface PortfolioSnapshot {
@@ -53,6 +58,8 @@ export interface PortfolioSnapshot {
   nav: number;
   pnl: number;
   realized: number;
+  netRealized: number;
+  grossRealized: number;
   unrealized: number;
   cash: number;
   feesPaid: number;
@@ -63,7 +70,9 @@ export const portfolioSnapshotSchema = z.object({
   positions: z.record(positionMarkSchema),
   nav: z.number(),
   pnl: z.number(),
-  realized: z.number(),
+  realized: z.number().default(0),
+  netRealized: z.number().default(0),
+  grossRealized: z.number().default(0),
   unrealized: z.number(),
   cash: z.number(),
   feesPaid: z.number().default(0)
@@ -74,6 +83,8 @@ export interface PortfolioAnalytics {
   nav: number;
   pnl: number;
   realized: number;
+  netRealized: number;
+  grossRealized: number;
   unrealized: number;
   cash: number;
   peakNav: number;
@@ -88,6 +99,8 @@ export interface PortfolioAnalytics {
       avgPx: number;
       markPx: number;
       realized: number;
+      netRealized: number;
+      grossRealized: number;
       unrealized: number;
       notional: number;
     }
@@ -99,6 +112,8 @@ export const portfolioAnalyticsSchema = z.object({
   nav: z.number(),
   pnl: z.number(),
   realized: z.number().default(0),
+  netRealized: z.number().default(0),
+  grossRealized: z.number().default(0),
   unrealized: z.number().default(0),
   cash: z.number(),
   peakNav: z.number(),
@@ -112,6 +127,8 @@ export const portfolioAnalyticsSchema = z.object({
       avgPx: z.number(),
       markPx: z.number(),
       realized: z.number().default(0),
+      netRealized: z.number().default(0),
+      grossRealized: z.number().default(0),
       unrealized: z.number().default(0),
       notional: z.number()
     })
