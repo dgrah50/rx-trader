@@ -63,7 +63,7 @@ export const createMarketExposureGuard = (opts: MarketExposureGuardOptions): Mar
 
   const updateMargin = (order: OrderNew) => {
     if (!(isPerp || (isSpot && leverage > 1))) return;
-    const px = order.px ?? (typeof (order.meta as any)?.execRefPx === 'number' ? (order.meta as any).execRefPx : 0);
+    const px = order.px ?? order.meta?.execRefPx ?? 0;
     const notional = Math.abs(order.qty * px);
     if (notional > 0) committedMargin += notional;
   };

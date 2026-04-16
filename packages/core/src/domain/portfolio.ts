@@ -13,6 +13,20 @@ export interface Fill {
   side: 'BUY' | 'SELL';
 }
 
+export interface PositionMark {
+  t: number;
+  symbol: string;
+  pos: number;
+  px: number;
+  avgPx: number;
+  realized: number;
+  netRealized: number;
+  grossRealized: number;
+  unrealized: number;
+  notional: number;
+  pnl: number;
+}
+
 export const fillSchema = z.object({
   id: uuidSchema,
   orderId: uuidSchema,
@@ -24,19 +38,6 @@ export const fillSchema = z.object({
   liquidity: z.enum(['MAKER', 'TAKER']).optional(),
   side: sideSchema
 });
-
-interface PositionMark {
-  t: number;
-  symbol: string;
-  pos: number;
-  px: number;
-  avgPx: number;
-  unrealized: number;
-  netRealized: number;
-  grossRealized: number;
-  notional: number;
-  pnl: number;
-}
 
 export const positionMarkSchema = z.object({
   t: timestampSchema,

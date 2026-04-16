@@ -1,4 +1,10 @@
-import type { DomainEvent, PortfolioAnalytics, BalanceEntry, MarginSummary } from '@rx-trader/core/domain';
+import type {
+  DomainEvent,
+  PortfolioAnalytics,
+  BalanceEntry,
+  MarginSummary,
+  PositionMark
+} from '@rx-trader/core/domain';
 import type { EventStore } from './eventStore';
 
 interface Projection<TState> {
@@ -29,23 +35,14 @@ export const ordersView: Projection<Record<string, DomainEvent>> = {
   }
 };
 
-type PositionMarkShape = {
-  symbol?: string;
-  pos?: number;
-  avgPx?: number;
-  px?: number;
-  t?: number;
-  realized?: number;
-  netRealized?: number;
-  grossRealized?: number;
-  unrealized?: number;
-  notional?: number;
-  pnl?: number;
-};
-
 interface PositionState {
-  positions: Record<string, PositionMarkShape>;
+  positions: Record<string, PositionMark>;
   t?: number;
+}
+
+interface PortfolioSnapshotEventData {
+  t: number;
+  positions: Record<string, Partial<PositionMark>>;
 }
 
 export const positionsProjection: Projection<PositionState> = {
@@ -53,26 +50,41 @@ export const positionsProjection: Projection<PositionState> = {
   init: () => ({ positions: {} }),
   reduce: (state, event) => {
     if (event.type === 'portfolio.snapshot') {
-      const data = event.data as any;
-      const positions = (data.positions ?? {}) as Record<string, PositionMarkShape>;
+      const data = event.data as PortfolioSnapshotEventData;
+      const positions = data.positions ?? {};
       state.positions = Object.fromEntries(
         Object.entries(positions).map(([symbol, position]) => {
+          const eventTs = position.t ?? data.t ?? event.ts ?? Date.now();
+          const px = position.px ?? 0;
+          const pos = position.pos ?? 0;
+          const avgPx = position.avgPx ?? 0;
           const netRealized = position.netRealized ?? 0;
           const grossRealized = position.grossRealized ?? 0;
           const unrealized = position.unrealized ?? 0;
+          const realized = position.realized ?? netRealized;
+          const notional =
+            typeof position.notional === 'number' && Number.isFinite(position.notional)
+              ? position.notional
+              : px * pos;
           const pnl =
             typeof position.pnl === 'number' && Number.isFinite(position.pnl)
               ? position.pnl
-              : netRealized + unrealized;
+              : realized + unrealized;
           return [
             symbol,
             {
-              ...position,
-              realized: netRealized,
+              t: eventTs,
+              symbol,
+              pos,
+              px,
+              avgPx,
+              realized,
               netRealized,
               grossRealized,
+              unrealized,
+              notional,
               pnl
-            }
+            } satisfies PositionMark
           ];
         })
       );
@@ -102,13 +114,21 @@ interface BalancesState {
   updatedAt?: number;
 }
 
+interface BalanceAdjustedEventData {
+  venue: string;
+  asset: string;
+  delta: number;
+  newTotal?: number;
+  t: number;
+}
+
 export const balancesProjection: Projection<BalancesState> = {
   name: 'account_balances',
   init: () => ({ balances: {} }),
   reduce: (state, event) => {
     if (event.type === 'account.balance.adjusted') {
-      const data = event.data as any;
-      const venue = data.venue;
+      const data = event.data as BalanceAdjustedEventData;
+      const venue = data.venue as BalanceEntry['venue'];
       const asset = data.asset;
       const venueBalances = state.balances[venue] ?? {};
       const existing = venueBalances[asset] ?? {
@@ -154,6 +174,16 @@ interface BalanceSnapshotEntry {
   t: number;
 }
 
+interface BalanceSnapshotEventData {
+  venue: string;
+  asset: string;
+  total: number;
+  ledgerTotal: number;
+  drift: number;
+  provider: string;
+  t: number;
+}
+
 interface BalanceSnapshotState {
   snapshots: Record<string, Record<string, BalanceSnapshotEntry>>;
   updatedAt?: number;
@@ -164,7 +194,7 @@ export const balanceSnapshotsProjection: Projection<BalanceSnapshotState> = {
   init: () => ({ snapshots: {} }),
   reduce: (state, event) => {
     if (event.type === 'account.balance.snapshot') {
-      const data = event.data as any;
+      const data = event.data as BalanceSnapshotEventData;
       const venueSnapshots = state.snapshots[data.venue] ?? {};
       venueSnapshots[data.asset] = {
         total: data.total,
@@ -186,13 +216,19 @@ interface MarginState {
   updatedAt?: number;
 }
 
+interface MarginUpdatedEventData {
+  venue: string;
+  summary: MarginSummary;
+  t: number;
+}
+
 export const marginProjection: Projection<MarginState> = {
   name: 'account_margin',
   init: () => ({ summaries: {} }),
   reduce: (state, event) => {
     if (event.type === 'account.margin.updated') {
-      const data = event.data as any;
-      state.summaries[data.venue] = data.summary as MarginSummary;
+      const data = event.data as MarginUpdatedEventData;
+      state.summaries[data.venue as MarginSummary['venue']] = data.summary;
       const eventTs = data.t ?? event.ts ?? Date.now();
       state.updatedAt = Math.max(state.updatedAt ?? 0, eventTs);
     }

@@ -4,7 +4,7 @@ import type { Observable } from 'rxjs';
 import type { OrderNew } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
-import type { AccountExposureGuard } from '@rx-trader/risk/preTrade';
+import type { AccountExposureGuard, RiskDecision } from '@rx-trader/risk/preTrade';
 import { splitRiskStream } from '@rx-trader/risk';
 import type { ExecutionPolicyConfig, StrategyDefinition } from '@rx-trader/config';
 import type { Metrics } from '@rx-trader/observability/metrics';
@@ -40,7 +40,7 @@ export interface StrategyRuntime {
   signals$: Observable<StrategySignal>;
   intents$: Observable<OrderNew>;
   rawIntents$: Observable<OrderNew>;
-  rejects$: Observable<any>;
+  rejects$: Observable<RiskDecision>;
   fees?: RuntimeStrategyConfig['fees'];
   margin?: StrategyMarginConfig;
   exit?: RuntimeStrategyConfig['exit'];
@@ -88,11 +88,11 @@ export const createStrategyOrchestrator = (
             strategyId: definition.id,
             symbol: definition.tradeSymbol,
             side: signal.action,
-            strength: 1.0, // Default strength as it's not in StrategySignal
-            reasons: [] // No reasons in StrategySignal
+            strength: 1.0,
+            reasons: []
           },
           ts: clock.now(),
-          traceId: crypto.randomUUID(), // Start a new trace for this signal
+          traceId: crypto.randomUUID(),
           metadata: {}
         });
       }),
@@ -107,7 +107,7 @@ export const createStrategyOrchestrator = (
 
     const buildIntents = intentBuilderFactory({
       account: options.executionAccount,
-      policy: feeAwarePolicy as any,
+      policy: feeAwarePolicy,
       tickSize: runtimeConfig.tickSize,
       lotSize: runtimeConfig.lotSize,
       now: clock.now.bind(clock),
@@ -117,9 +117,7 @@ export const createStrategyOrchestrator = (
 
     const strategyIntents$ = buildIntents(rawSignals$, feedManager.marks$).pipe(
       tap((intent) => {
-        // We don't have easy access to the signal's traceId here without threading it through buildIntents.
-        // For now, we'll emit the intent event. Future improvement: thread traceId.
-        const meta = intent.meta as Record<string, unknown> | undefined;
+        const meta = intent.meta;
         eventBus.emit({
           id: crypto.randomUUID(),
           type: 'strategy.intent',
@@ -128,8 +126,11 @@ export const createStrategyOrchestrator = (
             symbol: intent.symbol,
             side: intent.side as 'BUY' | 'SELL',
             qty: intent.qty,
-            targetSize: (meta?.targetSize as number) ?? undefined,
-            urgency: (meta?.urgency as any) ?? undefined
+            targetSize: typeof meta?.targetSize === 'number' ? meta.targetSize : undefined,
+            urgency:
+              meta?.urgency === 'low' || meta?.urgency === 'medium' || meta?.urgency === 'high'
+                ? meta.urgency
+                : undefined
           },
           ts: clock.now(),
           metadata: meta
@@ -139,7 +140,7 @@ export const createStrategyOrchestrator = (
     );
 
     const strategyReconcile$ = options.reconcile$?.pipe(
-      filter((order) => (order.meta as any)?.strategyId === definition.id)
+      filter((order) => order.meta?.strategyId === definition.id)
     );
 
     const [budgetApproved$, budgetRejected$] = splitRiskStream(
@@ -151,7 +152,6 @@ export const createStrategyOrchestrator = (
       strategyReconcile$
     );
 
-    // Emit risk check events using tap() to keep them in the pipeline
     const approvedOrders$ = budgetApproved$.pipe(
       tap((decision) => {
         options.eventBus.emit({
@@ -171,7 +171,6 @@ export const createStrategyOrchestrator = (
       share()
     );
 
-    // Also emit events for rejections - MUST subscribe to force tap() execution
     const rejectsWithEvents$ = budgetRejected$.pipe(
       tap((decision) => {
         options.eventBus.emit({
@@ -190,9 +189,7 @@ export const createStrategyOrchestrator = (
       share()
     );
 
-    // Force subscription to ensure rejection events are emitted
-    // (Telemetry and other consumers may not subscribe immediately)
-    rejectsWithEvents$.subscribe(); // Keep the observable hot
+    rejectsWithEvents$.subscribe();
 
     const liveIntents$ = definition.mode === 'sandbox' ? EMPTY : approvedOrders$;
     const intents$ = liveIntents$.pipe(share());

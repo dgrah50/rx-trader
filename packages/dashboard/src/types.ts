@@ -1,46 +1,26 @@
-export interface StrategyMetrics {
-  signals: number;
-  intents: number;
-  orders: number;
-  fills: number;
-  rejects: number;
-  lastSignalTs: number | null;
-  lastIntentTs: number | null;
-  lastOrderTs: number | null;
-  lastFillTs: number | null;
-  lastRejectTs: number | null;
-}
+import type {
+  BalanceEntry as CoreBalanceEntry,
+  BalanceSyncTelemetry as CoreBalanceSyncTelemetry,
+  ClosedTrade as CoreClosedTrade,
+  DomainEvent,
+  MarginSummary as CoreMarginSummary,
+  OpenTrade as CoreOpenTrade,
+  PortfolioAnalytics,
+  PositionMark,
+  TradeDirection as CoreTradeDirection,
+  TradesResponse as CoreTradesResponse
+} from '@rx-trader/core/domain';
+import type { FeedHealthSnapshot as PipelineFeedHealthSnapshot, StrategyTelemetrySnapshot } from '@rx-trader/pipeline';
+import type { LogEntry as ObservabilityLogEntry } from '@rx-trader/observability';
+import type {
+  BacktestArtifact as CoreBacktestArtifact,
+  BacktestSummary as CoreBacktestSummary,
+  BacktestStats as CoreBacktestStats
+} from '@rx-trader/backtest';
 
-export interface StrategyBudgetSummary {
-  notional?: number;
-  maxPosition?: number;
-  throttle?: { windowMs: number; maxCount: number };
-}
-
-export interface StrategyRuntimeStatus {
-  id: string;
-  type: string;
-  tradeSymbol: string;
-  primaryFeed: string;
-  extraFeeds: string[];
-  mode: 'live' | 'sandbox';
-  priority: number;
-  budget?: StrategyBudgetSummary;
-  params?: Record<string, unknown>;
-  fees?: {
-    makerBps: number;
-    takerBps: number;
-    source?: string;
-  };
-  margin?: StrategyMarginInfo;
-  metrics?: StrategyMetrics;
-}
-
-export interface StrategyMarginInfo {
-  mode: 'cash' | 'margin' | 'perp';
-  leverageCap: number;
-  productType: 'SPOT' | 'PERP';
-}
+export type StrategyRuntimeStatus = StrategyTelemetrySnapshot;
+export type StrategyMetrics = StrategyRuntimeStatus['metrics'];
+export type StrategyMarginInfo = NonNullable<StrategyRuntimeStatus['margin']>;
 
 export const createEmptyStrategyMetrics = (): StrategyMetrics => ({
   signals: 0,
@@ -55,129 +35,40 @@ export const createEmptyStrategyMetrics = (): StrategyMetrics => ({
   lastRejectTs: null
 });
 
-export interface PnlResponse {
-  nav: number;
-  realized: number;
-  netRealized: number;
-  grossRealized: number;
-  unrealized: number;
-  feesPaid: number;
-}
-
-export interface PositionSnapshot {
-  pos: number;
-  avgPx: number;
-  px: number;
-  pnl?: number;
-  realized?: number;
-  unrealized?: number;
-  netRealized?: number;
-  grossRealized?: number;
-}
-
-export interface PositionsResponse {
-  [symbol: string]: PositionSnapshot;
-}
-
-export type TradeDirection = 'LONG' | 'SHORT';
-
-export interface TradeSummary {
-  symbol: string;
-  venue?: string;
-  qty: number;
-  direction: TradeDirection;
-  entryPx: number;
-  entryTs: number;
-  fees: number;
-}
-
-export interface OpenTrade extends TradeSummary {
-  markPx: number;
-  unrealizedPnl: number;
-}
-
-export interface ClosedTrade extends TradeSummary {
-  exitPx: number;
-  exitTs: number;
-  realizedPnl: number;
-}
-
-export interface TradesResponse {
-  open: OpenTrade[];
-  closed: ClosedTrade[];
-}
-
-export interface LogEntry {
-  id: string;
-  t: number;
-  level: string;
-  name: string;
-  msg: string;
-  data?: Record<string, unknown>;
-}
-
-export interface BacktestSummary {
-  symbol: string;
-  ticksUsed: number;
-  events: number;
-  sharpe: number;
-  maxDrawdownPct: number;
-  runtimeMs: number;
-}
-
-export interface BacktestArtifact {
-  summary: BacktestSummary;
-  navCurve: Array<{ t: number; nav: number }>;
-}
-
+export type PnlResponse = PortfolioAnalytics;
+export type PositionSnapshot = PositionMark;
+export type PositionsResponse = Record<string, PositionSnapshot>;
+export type TradeDirection = CoreTradeDirection;
+export type OpenTrade = CoreOpenTrade;
+export type ClosedTrade = CoreClosedTrade;
+export type TradesResponse = CoreTradesResponse;
+export type LogEntry = ObservabilityLogEntry;
+export type BacktestArtifact = CoreBacktestArtifact;
 export interface BacktestHistoryEntry {
   id: string;
   ts: number;
-  summary: BacktestSummary | null;
+  summary: Partial<CoreBacktestSummary> | null;
+  stats?: Partial<CoreBacktestStats> | null;
 }
-
-export interface FeedHealthSnapshot {
-  id: string;
-  status: 'connecting' | 'connected' | 'disconnected';
-  reconnects: number;
-  lastTickTs: number | null;
-  ageSeconds: number | null;
-}
-
-export interface BalanceEntry {
+export type FeedHealthSnapshot = PipelineFeedHealthSnapshot;
+export interface BalanceEntry extends Omit<CoreBalanceEntry, 'venue'> {
   venue: string;
-  asset: string;
-  available: number;
-  locked: number;
-  total: number;
-  lastUpdated: number;
 }
+export interface MarginSummary extends Omit<CoreMarginSummary, 'venue'> {
+  venue: string;
+}
+export type BalanceSyncTelemetry = CoreBalanceSyncTelemetry;
+export type EventMessage = DomainEvent;
+export type OrderEvent = DomainEvent;
 
 export interface AccountBalancesResponse {
   balances: Record<string, Record<string, BalanceEntry>>;
   updated: number | null;
 }
 
-export interface MarginSummary {
-  venue: string;
-  equity: number;
-  marginUsed: number;
-  maintenance: number;
-  leverageCap?: number;
-  collateralAsset: string;
-}
-
 export interface AccountMarginResponse {
   summaries: Record<string, MarginSummary>;
   updated: number | null;
-}
-
-export interface BalanceSyncTelemetry {
-  venue: string;
-  provider: string;
-  lastRunMs: number | null;
-  lastSuccessMs: number | null;
-  lastError?: { message: string; ts: number } | null;
 }
 
 export interface StatusResponse {
@@ -222,19 +113,4 @@ export interface StatusResponse {
   accounting?: {
     balanceSync?: BalanceSyncTelemetry | null;
   };
-}
-
-export interface EventMessage {
-  id: string;
-  type: string;
-  ts: number;
-  data?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-}
-
-export interface OrderEvent {
-  id: string;
-  type: string;
-  ts: number;
-  data?: Record<string, unknown>;
 }

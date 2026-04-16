@@ -270,6 +270,10 @@ maybeDescribe('runtime end-to-end integration', () => {
         (evt.data as any)?.metadata?.seed === 'demo'
     );
     expect(seedEvent).toBeDefined();
+    const initialBalanceSnapshots = initialEvents.filter(
+      (evt) => evt.type === 'account.balance.snapshot'
+    );
+    expect(initialBalanceSnapshots.length).toBeGreaterThan(0);
 
     const baseTime = 1_000_000;
     const emit = (subject: Subject<MarketTick>, tick: MarketTick) => {

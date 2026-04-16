@@ -4,6 +4,7 @@ import type { AppConfig } from '@rx-trader/config';
 import type { createEventStore } from '@rx-trader/event-store';
 import type { LoggerInstance, MetricsInstance } from '@rx-trader/pipeline';
 import type { BalanceSyncTelemetry } from '@rx-trader/portfolio';
+import type { RebalanceTelemetry } from '@rx-trader/portfolio/rebalancer/service';
 
 import type { DomainEvent } from '@rx-trader/core/domain';
 
@@ -23,7 +24,7 @@ interface ApiServerOptions {
   accounting?: {
     balanceTelemetry?: () => BalanceSyncTelemetry;
   };
-  rebalancer?: () => unknown;
+  rebalancer?: () => RebalanceTelemetry | null | undefined;
 }
 
 export const startApiServer = async (options: ApiServerOptions) => {

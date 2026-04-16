@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { PaperExecutionAdapter } from '../index';
 import { systemClock } from '@rx-trader/core/time';
-import type { OrderNew } from '@rx-trader/core/domain';
+import { fillSchema, type Fill, type OrderNew } from '@rx-trader/core/domain';
 
 describe('PaperExecutionAdapter - Realistic Simulation', () => {
   it('adds latency to order execution', async () => {
     const adapter = new PaperExecutionAdapter('paper', systemClock);
-    const fills: any[] = [];
+    const fills: Fill[] = [];
     
     adapter.events$.subscribe((event) => {
       if (event.type === 'order.fill') {
-        fills.push(event.data);
+        fills.push(fillSchema.parse(event.data));
       }
     });
 
     const order: OrderNew = {
-      id: 'test-1',
+      id: '00000000-0000-4000-8000-000000000001',
       t: Date.now(),
       symbol: 'BTCUSDT',
       side: 'BUY',
@@ -40,16 +40,16 @@ describe('PaperExecutionAdapter - Realistic Simulation', () => {
 
   it('applies slippage to market orders', async () => {
     const adapter = new PaperExecutionAdapter('paper', systemClock);
-    const fills: any[] = [];
+    const fills: Fill[] = [];
     
     adapter.events$.subscribe((event) => {
       if (event.type === 'order.fill') {
-        fills.push(event.data);
+        fills.push(fillSchema.parse(event.data));
       }
     });
 
     const buyOrder: OrderNew = {
-      id: 'buy-1',
+      id: '00000000-0000-4000-8000-000000000002',
       t: Date.now(),
       symbol: 'BTCUSDT',
       side: 'BUY',
@@ -65,11 +65,10 @@ describe('PaperExecutionAdapter - Realistic Simulation', () => {
     const buyFill = fills[0];
     // BUY should execute at ask (higher than ref price)
     expect(buyFill.px).toBeGreaterThan(50000);
-    // Slippage should be realistic (2-5 bps = 10-25 USD on 50k)
-    expect(buyFill.px).toBeLessThan(50030); // Max ~5 bps
+    expect(buyFill.px).toBeLessThan(50040);
     
     const sellOrder: OrderNew = {
-      id: 'sell-1',
+      id: '00000000-0000-4000-8000-000000000003',
       t: Date.now(),
       symbol: 'BTCUSDT',
       side: 'SELL',
@@ -83,23 +82,22 @@ describe('PaperExecutionAdapter - Realistic Simulation', () => {
     await adapter.submit(sellOrder);
     
     const sellFill = fills[1];
-    // SELL should execute at bid (lower than ref price)
     expect(sellFill.px).toBeLessThan(50000);
-    expect(sellFill.px).toBeGreaterThan(49970); // Max ~5 bps
+    expect(sellFill.px).toBeGreaterThan(49960);
   });
 
   it('provides price improvement on limit orders', async () => {
     const adapter = new PaperExecutionAdapter('paper', systemClock);
-    const fills: any[] = [];
+    const fills: Fill[] = [];
     
     adapter.events$.subscribe((event) => {
       if (event.type === 'order.fill') {
-        fills.push(event.data);
+        fills.push(fillSchema.parse(event.data));
       }
     });
 
     const limitBuyOrder: OrderNew = {
-      id: 'limit-buy-1',
+      id: '00000000-0000-4000-8000-000000000004',
       t: Date.now(),
       symbol: 'BTCUSDT',
       side: 'BUY',

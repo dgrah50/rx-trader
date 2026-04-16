@@ -42,6 +42,10 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, 'src'),
       '@rx-trader/core': path.resolve(__dirname, '../core/src/index.ts'),
+      '@rx-trader/backtest': path.resolve(__dirname, '../backtest/src/index.ts'),
+      '@rx-trader/pipeline': path.resolve(__dirname, '../pipeline/src/index.ts'),
+      '@rx-trader/observability': path.resolve(__dirname, '../observability/src/index.ts'),
+      '@rx-trader/event-store': path.resolve(__dirname, '../event-store/src/index.ts'),
     },
   },
 });

@@ -1,5 +1,14 @@
 import type { Clock } from '@rx-trader/core/time';
-import type { BalanceEntry } from '@rx-trader/core/domain';
+import type {
+  accountBalanceAdjustedSchema,
+  accountBalanceSnapshotSchema,
+  BalanceEntry,
+  BalanceSyncTelemetry as CoreBalanceSyncTelemetry
+} from '@rx-trader/core/domain';
+import type { z } from 'zod';
+
+export type AccountBalanceAdjustedEventData = z.infer<typeof accountBalanceAdjustedSchema>;
+export type AccountBalanceSnapshotEventData = z.infer<typeof accountBalanceSnapshotSchema>;
 
 export interface BalanceSnapshot {
   venue: string;
@@ -21,13 +30,13 @@ export interface BalanceSyncOptions {
   enqueue: (event: {
     id: string;
     type: 'account.balance.adjusted' | 'account.balance.snapshot';
-    data: unknown;
+    data: AccountBalanceAdjustedEventData | AccountBalanceSnapshotEventData;
     ts: number;
   }) => void;
   enqueueSnapshot?: (event: {
     id: string;
     type: 'account.balance.snapshot';
-    data: unknown;
+    data: AccountBalanceSnapshotEventData;
     ts: number;
   }) => void;
   clock: Clock;
@@ -38,12 +47,7 @@ export interface BalanceSyncOptions {
   applyLedgerDeltas?: boolean;
 }
 
-export interface BalanceSyncTelemetry {
-  venue: string;
-  provider: string;
-  lastRunMs: number | null;
-  lastSuccessMs: number | null;
-  lastError?: { message: string; ts: number } | null;
+export interface BalanceSyncTelemetry extends CoreBalanceSyncTelemetry {
   lastDriftBps?: number | null;
 }
 

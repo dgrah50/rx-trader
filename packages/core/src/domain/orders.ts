@@ -9,6 +9,22 @@ import {
   orderTypeSchema
 } from './primitives';
 
+export interface OrderMeta extends Record<string, unknown> {
+  execRefPx?: number;
+  expectedFeeBps?: number;
+  expectedPx?: number;
+  feeSource?: string;
+  liquidity?: 'MAKER' | 'TAKER';
+  mode?: string;
+  postOnly?: boolean;
+  reduceOnly?: boolean;
+  reason?: string;
+  strategyId?: string;
+  targetSize?: number;
+  urgency?: 'low' | 'medium' | 'high';
+  exit?: boolean;
+}
+
 export interface OrderNew {
   id: string;
   t: number;
@@ -19,7 +35,7 @@ export interface OrderNew {
   px?: number;
   tif: 'IOC' | 'FOK' | 'DAY';
   account: string;
-  meta?: Record<string, unknown>;
+  meta?: OrderMeta;
 }
 
 export const orderNewSchema = z

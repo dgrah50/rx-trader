@@ -1,3 +1,4 @@
+import { parseFiniteNumber } from '@rx-trader/core';
 import type { MarketStructureSnapshotData, VenueExchangePair } from '../types';
 
 interface BinanceExchangeInfo {
@@ -16,12 +17,6 @@ interface BinanceExchangeInfo {
 }
 
 const defaultUrl = 'https://api.binance.com/api/v3/exchangeInfo';
-
-const toNumber = (value?: string | number | null) => {
-  if (value === undefined || value === null) return undefined;
-  const num = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(num) ? num : undefined;
-};
 
 export const fetchBinanceMarketStructure = async (apiUrl: string = defaultUrl): Promise<MarketStructureSnapshotData> => {
   const response = await fetch(apiUrl);
@@ -70,10 +65,10 @@ export const fetchBinanceMarketStructure = async (apiUrl: string = defaultUrl): 
       exchSymbol: symbol.symbol,
       assetClass: 'SPOT',
       contractType: 'SPOT',
-      lotSize: toNumber(lotFilter?.stepSize) ?? 0,
-      minLotSize: toNumber(lotFilter?.minQty) ?? 0,
-      maxLotSize: toNumber(lotFilter?.maxQty) ?? null,
-      tickSize: toNumber(priceFilter?.tickSize) ?? 0,
+      lotSize: parseFiniteNumber(lotFilter?.stepSize) ?? 0,
+      minLotSize: parseFiniteNumber(lotFilter?.minQty) ?? 0,
+      maxLotSize: parseFiniteNumber(lotFilter?.maxQty) ?? null,
+      tickSize: parseFiniteNumber(priceFilter?.tickSize) ?? 0,
       pricePrecision: symbol.pricePrecision ?? symbol.quotePrecision,
       quantityPrecision: symbol.quantityPrecision ?? symbol.baseAssetPrecision,
       quotePrecision: symbol.quotePrecision,

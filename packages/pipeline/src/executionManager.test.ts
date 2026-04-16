@@ -70,16 +70,17 @@ describe('createExecutionManager', () => {
     const fills: any[] = [];
     manager.fills$.subscribe((fill) => fills.push(fill));
 
-    const order = {
+    const order: OrderNew = {
       ...createOrder(),
       type: 'LMT' as const,
-      meta: { expectedFeeBps: 25, liquidity: 'MAKER' }
+      meta: { expectedFeeBps: 25, liquidity: 'MAKER' as const }
     };
     await manager.submit(order);
 
     expect(fills).toHaveLength(1);
-    expect(fills[0]!.fee).toBeCloseTo(order.px! * order.qty * 0.0025, 10);
-    expect(fills[0]!.liquidity).toBe('MAKER');
+    const fill = fills[0]!;
+    expect(fill.fee).toBeCloseTo(fill.px * order.qty * 0.0025, 10);
+    expect(fill.liquidity).toBe('MAKER');
   });
 
   it('uses Binance gateway when live=true and credentials are provided', () => {

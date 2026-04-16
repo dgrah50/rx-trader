@@ -16,6 +16,7 @@ const basePosition = (
   pos,
   px: avgPx,
   avgPx,
+  realized: 0,
   unrealized: 0,
   netRealized: 0,
   grossRealized: 0,

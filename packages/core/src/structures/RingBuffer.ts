@@ -41,15 +41,14 @@ export class RingBuffer<T> {
 
     const limit = Math.min(count, this.size);
     const result: T[] = new Array(limit);
-    // Start from the newest item (head - 1) and go backwards
     let index = (this.head - 1 + this.capacity) % this.capacity;
-    
+
     for (let i = 0; i < limit; i++) {
       result[i] = this.buffer[index] as T;
       index = (index - 1 + this.capacity) % this.capacity;
     }
-    
-    return result; // Returns newest first
+
+    return result;
   }
 
   clear(): void {

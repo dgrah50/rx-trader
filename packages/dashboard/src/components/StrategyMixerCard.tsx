@@ -1,5 +1,5 @@
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -24,7 +24,6 @@ interface StrategyMixerCardProps {
   selectedStrategyId: string;
   onSelect: (id: string) => void;
   options: StrategyOption[];
-  focusLabel: string;
   aggregatedMetrics: StrategyMetrics;
   selectedStrategy: StrategyRuntimeStatus | null;
   formatAgo: (ts: number | null | undefined) => string;
@@ -71,7 +70,6 @@ export const StrategyMixerCard = ({
   selectedStrategyId,
   onSelect,
   options,
-  focusLabel,
   aggregatedMetrics,
   selectedStrategy,
   formatAgo,
@@ -117,14 +115,7 @@ export const StrategyMixerCard = ({
                 <div 
                   key={metric.label} 
                   className="flex flex-col px-2 py-1 rounded-sm border bg-card/50 min-w-[70px] flex-1 cursor-pointer hover:bg-accent/50 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // The original code had `onSelect(row.id)` here, but `row` is not defined in this scope.
-                    // This onClick handler is for a metric highlight, not a strategy row.
-                    // If the intention was to select the currently selected strategy, it would be:
-                    // if (selectedStrategy) onSelect(selectedStrategy.id);
-                    // For now, removing the erroneous call to avoid runtime errors.
-                  }}
+                  onClick={(e) => e.stopPropagation()}
                 >
                   <span className="text-[9px] uppercase tracking-wider text-muted-foreground">{metric.label}</span>
                   <span className="text-xs font-mono font-medium">{content}</span>

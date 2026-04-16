@@ -54,10 +54,10 @@ const extractFeeMeta = (
   order: OrderNew,
   defaults: { maker: number; taker: number }
 ): PendingFeeMeta => {
-  const meta = order.meta as Record<string, unknown> | undefined;
+  const meta = order.meta;
   const liquidity =
     meta?.liquidity === 'MAKER' || meta?.liquidity === 'TAKER'
-      ? (meta.liquidity as 'MAKER' | 'TAKER')
+      ? meta.liquidity
       : order.type === 'LMT'
         ? 'MAKER'
         : 'TAKER';

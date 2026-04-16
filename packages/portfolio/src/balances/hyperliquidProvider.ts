@@ -1,3 +1,4 @@
+import { parseFiniteNumber } from '@rx-trader/core';
 import type { BalanceProvider, BalanceSnapshot } from './types';
 
 interface HyperliquidBalanceProviderConfig {
@@ -14,6 +15,14 @@ interface HyperliquidBalanceEntry {
   available?: string | number;
   free?: string | number;
   locked?: string | number;
+}
+
+interface HyperliquidBalanceResponse {
+  balances?: HyperliquidBalanceEntry[];
+  spotBalances?: HyperliquidBalanceEntry[];
+  result?: {
+    balances?: HyperliquidBalanceEntry[];
+  };
 }
 
 export class HyperliquidBalanceProvider implements BalanceProvider {
@@ -46,9 +55,9 @@ export class HyperliquidBalanceProvider implements BalanceProvider {
     const payload = await response.json();
     const entries = extractEntries(payload);
     return entries.map((entry) => {
-      const total = toNumber(entry.total ?? entry.balance ?? entry.free ?? entry.available ?? 0);
-      const available = toNumber(entry.available ?? entry.free ?? total);
-      const locked = toNumber(entry.locked ?? Math.max(0, total - available));
+      const total = parseFiniteNumber(entry.total ?? entry.balance ?? entry.free ?? entry.available ?? 0) ?? 0;
+      const available = parseFiniteNumber(entry.available ?? entry.free ?? total) ?? 0;
+      const locked = parseFiniteNumber(entry.locked ?? Math.max(0, total - available)) ?? 0;
       const asset = (entry.coin ?? entry.asset ?? 'USD').toUpperCase();
       return {
         venue: this.venue,
@@ -64,21 +73,10 @@ export class HyperliquidBalanceProvider implements BalanceProvider {
   }
 }
 
-const extractEntries = (payload: any): HyperliquidBalanceEntry[] => {
+const extractEntries = (payload: HyperliquidBalanceResponse | HyperliquidBalanceEntry[]): HyperliquidBalanceEntry[] => {
   if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.balances)) return payload.balances;
-  if (Array.isArray(payload?.spotBalances)) return payload.spotBalances;
-  if (Array.isArray(payload?.result?.balances)) return payload.result.balances;
+  if (Array.isArray(payload.balances)) return payload.balances;
+  if (Array.isArray(payload.spotBalances)) return payload.spotBalances;
+  if (Array.isArray(payload.result?.balances)) return payload.result.balances;
   return [];
-};
-
-const toNumber = (value: unknown): number => {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string' && value.trim().length) {
-    const parsed = Number(value);
-    if (!Number.isNaN(parsed)) {
-      return parsed;
-    }
-  }
-  return 0;
 };

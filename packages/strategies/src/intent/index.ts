@@ -1,7 +1,7 @@
 import { filter, map, tap, withLatestFrom, shareReplay } from 'rxjs';
 import type { Observable } from 'rxjs';
 import type { StrategySignal } from '../types';
-import type { MarketTick, OrderNew } from '@rx-trader/core/domain';
+import type { MarketTick, OrderMeta, OrderNew } from '@rx-trader/core/domain';
 
 type Side = 'BUY' | 'SELL';
 
@@ -127,7 +127,7 @@ export const createIntentBuilder = (opts: IntentBuilderOptions) => {
 
   const finalizeOrder = (
     order: OrderNew,
-    meta: Record<string, unknown>,
+    meta: OrderMeta,
     timestamp: number
   ): OrderNew | null => {
     const cooldownKey = `${order.symbol}:${order.side}`;

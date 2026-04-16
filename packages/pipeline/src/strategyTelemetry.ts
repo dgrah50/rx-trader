@@ -52,7 +52,6 @@ export interface StrategyTelemetrySnapshot {
 export interface StrategyTelemetry {
   snapshot: () => StrategyTelemetrySnapshot[];
   stop: () => void;
-  // Legacy methods kept for compatibility during transition, but they now just emit to bus or are no-ops if bus handles it
   recordOrder: (order: OrderNew) => void;
   recordFill: (fill: Fill) => void;
   recordRiskReject: (order: OrderNew, reasons?: string[]) => void;
@@ -60,9 +59,7 @@ export interface StrategyTelemetry {
   recordExit: (strategyId: string, reason?: string) => void;
 }
 
-interface TelemetryEntry extends StrategyTelemetrySnapshot {
-  definition: StrategyDefinition;
-}
+type TelemetryEntry = StrategyTelemetrySnapshot;
 
 const createInitialMetrics = (): StrategyMetrics => ({
   signals: 0,
@@ -107,13 +104,13 @@ const snapshotEntry = (entry: TelemetryEntry): StrategyTelemetrySnapshot => ({
 
 const selectStrategyId = (
   order: Pick<OrderNew, 'meta' | 'symbol'>,
-  fallbacks: Map<string, string[]>
+  strategiesBySymbol: Map<string, string[]>
 ) => {
   const metaId = order.meta?.strategyId;
   if (typeof metaId === 'string' && metaId.length) {
     return metaId;
   }
-  const ids = fallbacks.get(order.symbol.toUpperCase());
+  const ids = strategiesBySymbol.get(order.symbol.toUpperCase());
   return ids?.[0] ?? null;
 };
 
@@ -125,15 +122,15 @@ export const createStrategyTelemetry = (params: {
   const clock = params.clock ?? systemClock;
   const entries = new Map<string, TelemetryEntry>();
   const orderToStrategy = new Map<string, string>();
-  const symbolFallbacks = new Map<string, string[]>();
+  const strategiesBySymbol = new Map<string, string[]>();
   const subs: Subscription[] = [];
 
   const trackSymbol = (definition: StrategyDefinition) => {
     const symbol = definition.tradeSymbol.toUpperCase();
-    const current = symbolFallbacks.get(symbol) ?? [];
+    const current = strategiesBySymbol.get(symbol) ?? [];
     if (!current.includes(definition.id)) {
       current.push(definition.id);
-      symbolFallbacks.set(symbol, current);
+      strategiesBySymbol.set(symbol, current);
     }
   };
 
@@ -149,191 +146,162 @@ export const createStrategyTelemetry = (params: {
       priority: definition.priority ?? 0,
       budget: definition.budget,
       params: definition.params ?? {},
-      fees: undefined, // Fees are runtime config, not definition. Can be added if needed.
-      margin: undefined, // Margin is runtime config.
+      fees: undefined,
+      margin: undefined,
       metrics: createInitialMetrics(),
-      exits: createExitMetrics(),
-      definition: definition
+      exits: createExitMetrics()
     };
     entries.set(entry.id, entry);
   });
 
-interface StrategySignalEventData {
-  strategyId: string;
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  strength?: number;
-  reasons?: string[];
-}
+  const recordSignal = (strategyId: string, ts: number) => {
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    entry.metrics.signals += 1;
+    entry.metrics.lastSignalTs = ts;
+  };
 
-  // Subscribe to EventBus
+  const recordIntent = (strategyId: string, ts: number) => {
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    entry.metrics.intents += 1;
+    entry.metrics.lastIntentTs = ts;
+  };
+
+  const recordRiskCheck = (strategyId: string, ts: number) => {
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    entry.metrics.rejects += 1;
+    entry.metrics.lastRejectTs = ts;
+  };
+
+  const recordOrderMetrics = (strategyId: string, orderId: string, ts: number) => {
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    orderToStrategy.set(orderId, strategyId);
+    entry.metrics.orders += 1;
+    entry.metrics.lastOrderTs = ts;
+  };
+
+  const recordFillMetrics = (orderId: string, ts: number) => {
+    const strategyId = orderToStrategy.get(orderId);
+    if (!strategyId) return;
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    entry.metrics.fills += 1;
+    entry.metrics.lastFillTs = ts;
+  };
+
+  const recordRejectMetrics = (strategyId: string, rejectId: string, ts: number) => {
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+    orderToStrategy.set(rejectId, strategyId);
+    entry.metrics.rejects += 1;
+    entry.metrics.lastRejectTs = ts;
+  };
+
+  const recordExitMetrics = (strategyId: string, reason: string | undefined, ts: number) => {
+    const entry = entries.get(strategyId);
+    if (!entry) return;
+
+    entry.metrics.intents += 1;
+    entry.metrics.lastIntentTs = ts;
+
+    if (reason) {
+      entry.exits.total += 1;
+      entry.exits.byReason[reason] = (entry.exits.byReason[reason] ?? 0) + 1;
+      entry.exits.lastReason = reason;
+      entry.exits.lastTs = ts;
+    }
+  };
+
+  type StrategySignalEventData = {
+    strategyId: string;
+  };
+
+  type StrategyIntentEventData = {
+    strategyId: string;
+  };
+
+  type RiskCheckEventData = {
+    passed: boolean;
+    metadata?: { strategyId?: string };
+  };
+
   subs.push(
     params.eventBus.on('strategy.signal').subscribe((event) => {
       const data = event.data as StrategySignalEventData;
-      const entry = entries.get(data.strategyId);
-      if (entry) {
-        entry.metrics.signals += 1;
-        entry.metrics.lastSignalTs = event.ts;
-      }
+      recordSignal(data.strategyId, event.ts);
     })
   );
-
-interface StrategyIntentEventData {
-  strategyId: string;
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  qty?: number;
-  targetSize?: number;
-  urgency?: 'low' | 'medium' | 'high';
-}
 
   subs.push(
     params.eventBus.on('strategy.intent').subscribe((event) => {
       const data = event.data as StrategyIntentEventData;
-      const entry = entries.get(data.strategyId);
-      if (entry) {
-        entry.metrics.intents += 1;
-        entry.metrics.lastIntentTs = event.ts;
-      }
+      recordIntent(data.strategyId, event.ts);
     })
   );
 
-  // Subscribe to risk.check events to count pre-trade risk rejections
   subs.push(
     params.eventBus.on('risk.check').subscribe((event) => {
-      const data = event.data as { orderId: string; passed: boolean; reasons?: string[]; metadata?: { strategyId?: string } };
+      const data = event.data as RiskCheckEventData;
       const strategyId = data.metadata?.strategyId;
-      if (!strategyId) return;
-      const entry = entries.get(strategyId);
-      if (!entry) return;
-      
-      if (!data.passed) {
-        // This is a rejection from risk filter
-        entry.metrics.rejects += 1;
-        entry.metrics.lastRejectTs = event.ts;
-      }
+      if (!strategyId || data.passed) return;
+      recordRiskCheck(strategyId, event.ts);
     })
   );
 
   subs.push(
     params.eventBus.on('order.new').subscribe((event) => {
       const order = event.data as OrderNew;
-      const strategyId = selectStrategyId(order, symbolFallbacks);
+      const strategyId = selectStrategyId(order, strategiesBySymbol);
       if (!strategyId) return;
-      const entry = entries.get(strategyId);
-      if (!entry) return;
-      orderToStrategy.set(order.id, strategyId);
-      entry.metrics.orders += 1;
-      entry.metrics.lastOrderTs = event.ts;
+      recordOrderMetrics(strategyId, order.id, event.ts);
     })
   );
 
   subs.push(
     params.eventBus.on('order.fill').subscribe((event) => {
       const fill = event.data as Fill;
-      const strategyId = orderToStrategy.get(fill.orderId);
-      if (!strategyId) return;
-      const entry = entries.get(strategyId);
-      if (!entry) return;
-      entry.metrics.fills += 1;
-      entry.metrics.lastFillTs = event.ts;
-      // Don't delete mapping yet, might have multiple fills
+      recordFillMetrics(fill.orderId, event.ts);
     })
   );
 
   subs.push(
     params.eventBus.on('order.reject').subscribe((event) => {
-      const reject = event.data as OrderReject; // or generic reject data
-      // OrderReject has id, but it might be orderId.
-      // Check domain/orders.ts: OrderReject { id: string ... } where id is orderId?
-      // Usually reject.id is the orderId.
-      let strategyId = orderToStrategy.get(reject.id);
-      if (!strategyId && typeof event.metadata?.strategyId === 'string') {
-        strategyId = event.metadata.strategyId;
-      }
-      if (!strategyId) return;
-      const entry = entries.get(strategyId);
-      if (!entry) return;
-      entry.metrics.rejects += 1;
-      entry.metrics.lastRejectTs = event.ts;
+      const reject = event.data as OrderReject;
+      const strategyId = orderToStrategy.get(reject.id);
+      const resolvedStrategyId =
+        strategyId ?? (typeof event.metadata?.strategyId === 'string' ? event.metadata.strategyId : null);
+      if (!resolvedStrategyId) return;
+      recordRejectMetrics(resolvedStrategyId, reject.id, event.ts);
     })
   );
 
-  // Manual recording methods (for compatibility with startEngine until fully switched)
-  // These can now be no-ops if startEngine emits events to bus.
-  // But startEngine hasn't been updated yet.
-  // So we'll keep them working by manually triggering the logic or emitting to bus?
-  // Better: make them emit to bus!
-  
   const recordOrder = (order: OrderNew) => {
-    // If startEngine calls this, we can just emit to bus.
-    // But startEngine might also emit to bus later.
-    // To avoid loops, let's just rely on the bus subscription above.
-    // If startEngine is NOT emitting to bus yet, we need to do it here?
-    // No, startEngine will be updated next.
-    // For now, let's make these methods emit to the bus if they are called.
-    // This ensures backward compatibility.
-    params.eventBus.emit({
-        id: crypto.randomUUID(),
-        type: 'order.new',
-        data: order,
-        ts: clock.now()
-    });
+    const strategyId = selectStrategyId(order, strategiesBySymbol);
+    if (!strategyId) return;
+    recordOrderMetrics(strategyId, order.id, clock.now());
   };
 
   const recordFill = (fill: Fill) => {
-    params.eventBus.emit({
-        id: crypto.randomUUID(),
-        type: 'order.fill',
-        data: fill,
-        ts: clock.now()
-    });
+    recordFillMetrics(fill.orderId, clock.now());
   };
 
-  const recordRiskReject = (order: OrderNew, reasons?: string[]) => {
-    // This is a bit tricky because it's a reject of an order that might not be in the system yet?
-    // Or it is.
-    // We can emit order.reject
-    const strategyId = selectStrategyId(order, symbolFallbacks);
-    params.eventBus.emit({
-        id: crypto.randomUUID(),
-        type: 'order.reject',
-        data: {
-            id: order.id,
-            t: clock.now(),
-            reason: reasons?.join(', ') ?? 'risk-reject'
-        },
-        ts: clock.now(),
-        metadata: { reasons, strategyId: strategyId ?? undefined }
-    });
+  const recordRiskReject = (order: OrderNew, _reasons?: string[]) => {
+    const strategyId = selectStrategyId(order, strategiesBySymbol);
+    if (!strategyId) return;
+    recordRejectMetrics(strategyId, order.id, clock.now());
   };
 
   const recordExecutionReject = (reject: OrderReject) => {
-    params.eventBus.emit({
-        id: crypto.randomUUID(),
-        type: 'order.reject',
-        data: reject,
-        ts: clock.now()
-    });
+    const strategyId = orderToStrategy.get(reject.id);
+    if (!strategyId) return;
+    recordRejectMetrics(strategyId, reject.id, clock.now());
   };
 
   const recordExit = (strategyId: string, reason?: string) => {
-      // Exits are special. They might not be events yet.
-      // But we can just update the entry directly or emit a custom event?
-      // Let's update entry directly for now as 'exit' isn't a standard domain event yet (maybe it should be?)
-      // Actually, we can just keep the logic here.
-      const entry = entries.get(strategyId);
-      if (!entry) return;
-
-      entry.metrics.intents += 1;
-      entry.metrics.lastIntentTs = clock.now();
-
-      if (reason) {
-        entry.exits.total += 1;
-        entry.exits.byReason[reason] = (entry.exits.byReason[reason] ?? 0) + 1;
-        entry.exits.lastReason = reason;
-        entry.exits.lastTs = clock.now();
-      }
+    recordExitMetrics(strategyId, reason, clock.now());
   };
 
   const snapshot = () => Array.from(entries.values()).map((entry) => snapshotEntry(entry));

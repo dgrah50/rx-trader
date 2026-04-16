@@ -25,6 +25,14 @@ const marginSummarySchema = z.object({
 });
 export type MarginSummary = z.infer<typeof marginSummarySchema>;
 
+export interface BalanceSyncTelemetry {
+  venue: string;
+  provider: string;
+  lastRunMs: number | null;
+  lastSuccessMs: number | null;
+  lastError?: { message: string; ts: number } | null;
+}
+
 export const accountBalanceAdjustedSchema = z.object({
   id: uuidSchema,
   t: timestampSchema,
@@ -58,8 +66,6 @@ export const accountMarginUpdatedSchema = z.object({
   venue: venueSchema,
   summary: marginSummarySchema
 });
-// Account-level events are consumed via DomainEvent<'account.margin.updated'> etc.;
-// dedicated type aliases are unnecessary noise.
 
 export const accountTransferSchema = z.object({
   id: uuidSchema,

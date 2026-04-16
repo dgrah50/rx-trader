@@ -91,14 +91,15 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
       const px = position.mark ?? position.avgPx;
       const symbolRealized = position.netRealized ?? 0;
       const symbolGross = position.grossRealized ?? 0;
-      acc[symbol] = {
-        symbol,
-        pos: position.qty,
-        px,
-        avgPx: position.avgPx,
-        unrealized: (px - position.avgPx) * position.qty,
-        netRealized: symbolRealized,
-        grossRealized: symbolGross,
+    acc[symbol] = {
+      symbol,
+      pos: position.qty,
+      px,
+      avgPx: position.avgPx,
+      realized: symbolRealized,
+      unrealized: (px - position.avgPx) * position.qty,
+      netRealized: symbolRealized,
+      grossRealized: symbolGross,
         notional: px * position.qty,
         pnl: symbolRealized + (px - position.avgPx) * position.qty,
         t: Date.now()
@@ -123,7 +124,7 @@ const buildSnapshot = (fills: Fill[]): PortfolioSnapshot => {
     pnl: netRealized + unrealized,
     realized: 0,
     netRealized: 0,
-    grossRealized: 0,
+    grossRealized,
     unrealized,
     cash,
     feesPaid

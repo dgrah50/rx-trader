@@ -1,5 +1,4 @@
-import type { StartEngineOptions } from './startEngine';
-import { loadConfig, type EnvOverrides, type StrategyDefinition } from '@rx-trader/config';
+import { loadConfig, type EnvOverrides, type StrategyDefinition, type ExecutionPolicyConfig } from '@rx-trader/config';
 import { createLogger, createMetrics } from '@rx-trader/observability';
 import { createEventStore, createPersistenceManager, persistenceWorkerUrl } from '@rx-trader/event-store';
 import {
@@ -29,6 +28,7 @@ import { merge, Subject } from 'rxjs';
 import { share } from 'rxjs/operators';
 import type { OrderNew } from '@rx-trader/core/domain';
 import { EventBus } from '@rx-trader/core';
+import type { StartEngineOptions, RuntimeDependencies } from './runtimeTypes';
 
 const feedTypeToExchange = (feed: FeedType): string | null => {
   switch (feed) {
@@ -42,6 +42,11 @@ const feedTypeToExchange = (feed: FeedType): string | null => {
 };
 
 type EventStoreInstance = Awaited<ReturnType<typeof createEventStore>>;
+
+type QuoteReserveGuardHandle = AccountExposureGuard & {
+  reserveBase?: (orderId: string, qty: number) => void;
+  releaseBase?: (orderId: string) => void;
+};
 
 export interface RuntimeBuilderResult {
   config: ReturnType<typeof loadConfig>;
@@ -57,21 +62,14 @@ export interface RuntimeBuilderResult {
   instrument: InstrumentMetadata;
   strategies: RuntimeStrategyConfig[];
   strategyRuntimes: StrategyRuntime[];
-  accountGuard?: AccountExposureGuard;
+  accountGuard?: QuoteReserveGuardHandle;
   marginGuard?: ReturnType<typeof createMarketExposureGuard>;
   exitIntentSink: Subject<OrderNew>;
   eventBus: EventBus;
   reconcile$?: Subject<OrderNew>;
 }
 
-export interface RuntimeDependencies {
-  createFeedManager?: typeof createFeedManager;
-  createExecutionManager?: typeof createExecutionManager;
-  createEventStore?: typeof createEventStore;
-  createPersistenceManager?: typeof createPersistenceManager;
-  createIntentBuilder?: typeof createIntentBuilder;
-  createStrategy$?: typeof createStrategy$;
-}
+export type { RuntimeDependencies } from './runtimeTypes';
 
 export const buildRuntime = async (
   options: StartEngineOptions = {},
@@ -178,7 +176,7 @@ export const buildRuntime = async (
   const orchestrator = createStrategyOrchestrator({
     strategies: runtimeStrategies,
     executionAccount: config.execution.account,
-    executionPolicy: config.execution.policy as any,
+    executionPolicy: config.execution.policy as ExecutionPolicyConfig,
     baseRisk: risk,
     eventBus,
     clock: boundClock,

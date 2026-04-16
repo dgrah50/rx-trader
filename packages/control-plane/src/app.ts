@@ -17,6 +17,8 @@ import { getFeedHealthSnapshots, type FeedHealthSnapshot } from '@rx-trader/pipe
 import type { BalanceSyncTelemetry } from '@rx-trader/portfolio/balances/types';
 import { planRebalance, flattenBalancesState, type RebalancePlan } from '@rx-trader/portfolio';
 import type { StrategyTelemetrySnapshot } from '@rx-trader/pipeline';
+import type { BacktestArtifact, BacktestHistoryEntry } from '@rx-trader/backtest/types';
+import type { RebalanceTelemetry } from '@rx-trader/portfolio/rebalancer/service';
 import { resolveStrategyMarginConfig } from './marginConfig';
 import {
   PaperExecutionAdapter,
@@ -69,8 +71,10 @@ export interface RuntimeMeta {
 
 interface AccountingTelemetry {
   balanceTelemetry?: () => BalanceSyncTelemetry | null | undefined;
-  rebalancer?: () => unknown;
+  rebalancer?: () => RebalanceTelemetry | null | undefined;
 }
+
+type BacktestArtifactHistoryData = Pick<BacktestHistoryEntry, 'summary' | 'stats'>;
 
 const clampHistoryLimit = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return 10;
@@ -141,7 +145,7 @@ const normalizeStrategyStatus = (
 const readBacktestHistory = async (
   store: Awaited<ReturnType<typeof createEventStore>>,
   limit: number
-) => {
+): Promise<BacktestHistoryEntry[]> => {
   const events = await store.read();
   return events
     .filter((event) => event.type === 'backtest.artifact')
@@ -150,8 +154,8 @@ const readBacktestHistory = async (
     .map((event) => ({
       id: event.id,
       ts: event.ts,
-      summary: (event.data as any)?.summary ?? null,
-      stats: (event.data as any)?.stats ?? null
+      summary: (event.data as BacktestArtifactHistoryData | undefined)?.summary ?? null,
+      stats: (event.data as BacktestArtifactHistoryData | undefined)?.stats ?? null
     }));
 };
 
@@ -212,7 +216,7 @@ export const createControlPlaneRouter = async (
     : null;
 
   const executionAdapters = createExecutionAdapters(config);
-  let lastBacktestArtifact: unknown = null;
+  let lastBacktestArtifact: BacktestArtifact | null = null;
   let lastEventTs: number | null = null;
   let lastLogTs: number | null = null;
 
@@ -400,7 +404,7 @@ const handleCorsPreflight = (request: Request) => {
       updated: {
         balances: balancesState.updatedAt ?? null,
         margin: marginState.updatedAt ?? null,
-        pnl: (pnlSnapshot as any)?.t ?? null
+        pnl: pnlSnapshot?.t ?? null
       }
     });
   };
@@ -674,12 +678,6 @@ const handleCorsPreflight = (request: Request) => {
       const limit = clampHistoryLimit(Number(url.searchParams.get('limit') ?? '20'));
       if (runtimeMeta.events) {
         const events = runtimeMeta.events();
-        // RingBuffer returns oldest-first or newest-first?
-        // Usually RingBuffer.getRecent returns newest-first or we need to sort.
-        // Assuming getRecent(N) returns N most recent events.
-        // If it returns all, we slice.
-        // Let's assume it returns an array of events.
-        // We should sort them by ts desc just in case.
         return json(events.sort((a, b) => b.ts - a.ts).slice(0, limit));
       }
       const recentEvents = await readRecentEvents(store, limit);

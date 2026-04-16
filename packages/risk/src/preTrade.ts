@@ -43,14 +43,12 @@ const numberOrNull = (value: unknown): number | null =>
 const getReferencePx = (order: OrderNew) => {
   const px = numberOrNull(order.px);
   if (px !== null) return px;
-  const meta = order.meta as Record<string, unknown> | undefined;
-  const execPx = numberOrNull(meta?.execRefPx);
+  const execPx = numberOrNull(order.meta?.execRefPx);
   return execPx ?? 0;
 };
 
 const getExpectedFeeRate = (order: OrderNew) => {
-  const meta = order.meta as Record<string, unknown> | undefined;
-  const feeBps = numberOrNull(meta?.expectedFeeBps);
+  const feeBps = numberOrNull(order.meta?.expectedFeeBps);
   if (feeBps === null) return 0;
   return Math.max(0, feeBps) / 10_000;
 };
@@ -69,7 +67,7 @@ export const createPreTradeRisk = (
 
   const check = (order: OrderNew): RiskDecision => {
     const reasons: string[] = [];
-    const meta = order.meta as Record<string, unknown> | undefined;
+    const meta = order.meta;
     const isExit = Boolean(meta?.exit);
     const referencePx = getReferencePx(order);
     const grossNotional = Math.abs(order.qty * referencePx);

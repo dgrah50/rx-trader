@@ -193,11 +193,11 @@ const arbitrageDefinition: StrategyDefinition<ArbitrageParams> = {
   }
 };
 
-const registry: Record<StrategyType, StrategyDefinition<any>> = {
+const registry = {
   [StrategyType.Momentum]: momentumDefinition,
   [StrategyType.Pair]: pairDefinition,
   [StrategyType.Arbitrage]: arbitrageDefinition
-};
+} as const;
 
 export const getStrategyDefinition = <TParams extends Record<string, unknown>>(
   type: StrategyType
@@ -206,5 +206,5 @@ export const getStrategyDefinition = <TParams extends Record<string, unknown>>(
   if (!definition) {
     throw new Error(`Unsupported strategy type: ${type}`);
   }
-  return definition as StrategyDefinition<TParams>;
+  return definition as unknown as StrategyDefinition<TParams>;
 };

@@ -1,5 +1,17 @@
 import type { FeeScheduleUpsert } from '../types';
 
+interface HyperliquidFeeMeta {
+  perpFees?: {
+    makerFee?: number | string;
+    takerFee?: number | string;
+  };
+}
+
+interface HyperliquidFeeResponse {
+  meta?: HyperliquidFeeMeta;
+  perpFees?: HyperliquidFeeMeta['perpFees'];
+}
+
 export interface HyperliquidFeeFetcherOptions {
   baseUrl?: string;
   timestamp?: number;
@@ -21,7 +33,7 @@ export const fetchHyperliquidFees = async (
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}`);
     }
-    const data = (await res.json()) as Record<string, any>;
+    const data = (await res.json()) as HyperliquidFeeResponse;
     const perpFees = data?.meta?.perpFees ?? data?.perpFees;
     const maker = Number(perpFees?.makerFee ?? HYPERLIQUID_DEFAULT.makerBps / 10_000);
     const taker = Number(perpFees?.takerFee ?? HYPERLIQUID_DEFAULT.takerBps / 10_000);
@@ -37,6 +49,7 @@ export const fetchHyperliquidFees = async (
       } satisfies FeeScheduleUpsert
     ];
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return [
       {
         exchangeCode: 'hyperliquid',
@@ -46,7 +59,7 @@ export const fetchHyperliquidFees = async (
         takerBps: HYPERLIQUID_DEFAULT.takerBps,
         effectiveFrom: Math.floor(ts / 1000),
         source: 'default',
-        metadata: { error: (error as Error).message }
+        metadata: { error: message }
       }
     ];
   }

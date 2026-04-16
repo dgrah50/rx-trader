@@ -1,4 +1,4 @@
-import type { MarketTick } from '@rx-trader/core';
+import { type MarketTick, parseFiniteNumber } from '@rx-trader/core';
 import { WebSocketFeed, type WebSocketFeedOptions } from './websocketFeed';
 
 export type BinanceStream = 'bookTicker' | 'ticker';
@@ -60,11 +60,11 @@ export class BinanceFeedAdapter extends WebSocketFeed {
     return {
       t: typeof event.E === 'number' ? event.E : Date.now(),
       symbol,
-      bid: this.toNumber(event.b),
-      ask: this.toNumber(event.a),
-      last: this.toNumber(event.c ?? event.a ?? event.b),
-      bidSz: this.toNumber(event.B),
-      askSz: this.toNumber(event.A)
+      bid: parseFiniteNumber(event.b),
+      ask: parseFiniteNumber(event.a),
+      last: parseFiniteNumber(event.c ?? event.a ?? event.b),
+      bidSz: parseFiniteNumber(event.B),
+      askSz: parseFiniteNumber(event.A)
     };
   }
 
@@ -77,13 +77,5 @@ export class BinanceFeedAdapter extends WebSocketFeed {
       return combined.data ?? null;
     }
     return message as BinanceBookTickerEvent;
-  }
-
-  private toNumber(value?: string | number): number | undefined {
-    if (value === undefined) {
-      return undefined;
-    }
-    const num = typeof value === 'number' ? value : Number(value);
-    return Number.isFinite(num) ? num : undefined;
   }
 }

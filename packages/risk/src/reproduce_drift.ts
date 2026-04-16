@@ -1,6 +1,4 @@
-
 import { createPreTradeRisk, type RiskLimits } from './preTrade';
-import { systemClock } from '@rx-trader/core/time';
 import type { OrderNew } from '@rx-trader/core/domain';
 
 const run = () => {
@@ -27,7 +25,10 @@ const run = () => {
   console.log('--- Order 1: BUY 1.0 BTC ---');
   const d1 = risk.check(order1);
   console.log('Allowed:', d1.allowed, 'Reasons:', d1.reasons);
-  console.log('Exposures (internal):', (risk as any).exposures ?? 'hidden');
+  console.log(
+    'Exposures (internal):',
+    (risk as { exposures?: Record<string, number> }).exposures ?? 'hidden'
+  );
 
   const order2: OrderNew = {
     id: '2',

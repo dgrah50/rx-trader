@@ -11,10 +11,10 @@
   ],
   "scripts": {
     "dev:trader": "bun run scripts/trader.ts",
-    "lint": "bun x eslint .",
+    "lint": "bun x eslint eslint.config.js \"packages/**/*.ts\" \"scripts/**/*.ts\" \"examples/**/*.ts\" vitest.config.ts tsup.config.ts drizzle.config.ts",
     "typecheck": "bun x tsc --noEmit",
     "build": "bun x tsup",
-    "test": "bun test",
+    "test": "bun test $(git ls-files 'packages/**/*.test.ts' 'scripts/**/*.test.ts')",
     "test:e2e": "RUN_E2E_TESTS=true bun test packages/control-plane/src/runtime.e2e.test.ts",
     "test:marbles": "bun test --runInBand --config vitest.config.ts --dir packages --include **/*.marble.test.ts",
     "format": "bun x prettier --write .",

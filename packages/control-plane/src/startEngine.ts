@@ -12,6 +12,10 @@ import type {
 import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
 import { startApiServer } from './apiServer';
 import { buildRuntime } from './runtimeBuilder';
+import type {
+  BalanceProviderFactoryInput,
+  StartEngineOptions
+} from './runtimeTypes';
 import {
   createIntentReconciler,
   ExecutionCircuitOpenError,
@@ -28,38 +32,19 @@ import {
   MockBalanceProvider,
   type BalanceProvider
 } from '@rx-trader/portfolio';
-
-import type { RuntimeDependencies } from './runtimeBuilder';
-import type { EnvOverrides, AppConfig } from '@rx-trader/config';
+import type { AppConfig } from '@rx-trader/config';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
 import { wireFillAccounting } from '@rx-trader/portfolio';
 import { safeParse } from '@rx-trader/core/validation';
-import type { InstrumentMetadata, FeedManagerResult } from '@rx-trader/pipeline';
+import type { InstrumentMetadata } from '@rx-trader/pipeline';
 import { RebalanceService, TransferExecutionService, createTransferProviders } from '@rx-trader/portfolio';
 import type { EventStore } from '@rx-trader/event-store';
 import { createAuditLogger } from './auditLogger';
 import { toPricePoints } from '@rx-trader/strategies/utils';
+export type { EngineDependencies, StartEngineOptions } from './runtimeTypes';
 
 type AccountBalanceAdjusted = ReturnType<typeof accountBalanceAdjustedSchema['parse']>;
-
-export interface EngineDependencies extends RuntimeDependencies {
-  startApiServer?: typeof startApiServer;
-  createBalanceProvider?: (input: BalanceProviderFactoryInput) => BalanceProvider;
-}
-
-export interface StartEngineOptions {
-  live?: boolean;
-  registerSignalHandlers?: boolean;
-  configOverrides?: EnvOverrides;
-  clock?: Clock;
-  dependencies?: EngineDependencies;
-  hooks?: {
-    onExitIntent?: (order: OrderNew) => void;
-    onSnapshot?: (snapshot: PortfolioSnapshot) => void;
-    onAnalytics?: (analytics: PortfolioAnalytics) => void;
-  };
-}
 
 export interface EngineHandle {
   stop: () => void;
@@ -86,20 +71,17 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     accountGuard,
     marginGuard,
     exitIntentSink,
-    eventBus, // Destructure EventBus
+    eventBus,
     reconcile$
   } = await buildRuntime({ ...options, clock }, options.dependencies);
 
-  // Instantiate RingBuffer for high-frequency event storage (hot store)
-  const { RingBuffer } = await import('@rx-trader/core'); // Dynamic import or add to top-level imports
+  const { RingBuffer } = await import('@rx-trader/core');
   const ringBuffer = new RingBuffer<DomainEvent>(1000);
 
-  // Wire EventBus to RingBuffer (All events go to RingBuffer)
   eventBus.onAll().subscribe((event) => {
     ringBuffer.push(event);
   });
 
-  // Wire EventBus to Persistence (Transactional events go to SQLite)
   const PERSISTED_EVENTS = new Set<string>([
     EVENT_TYPE.ORDER_NEW,
     EVENT_TYPE.ORDER_FILL,
@@ -109,6 +91,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     EVENT_TYPE.PORTFOLIO_SNAPSHOT,
     EVENT_TYPE.PNL_ANALYTICS,
     EVENT_TYPE.ACCOUNT_BALANCE_ADJUSTED,
+    EVENT_TYPE.ACCOUNT_BALANCE_SNAPSHOT,
     EVENT_TYPE.ACCOUNT_TRANSFER,
     EVENT_TYPE.RISK_CHECK
   ]);
@@ -178,8 +161,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
 
   const getOrderPx = (order: OrderNew) => {
     if (typeof order.px === 'number' && Number.isFinite(order.px)) return order.px;
-    const meta = order.meta as Record<string, unknown> | undefined;
-    const execPx = meta?.execRefPx;
+    const execPx = order.meta?.execRefPx;
     return typeof execPx === 'number' ? execPx : null;
   };
 
@@ -250,7 +232,6 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     metrics.riskRejected.inc();
     logger.warn({ reasons: decision.reasons }, 'Order rejected');
     
-    // Emit rejection to EventBus (Telemetry and Persistence will pick it up)
     eventBus.emit({
       id: crypto.randomUUID(),
       type: 'order.reject',
@@ -295,7 +276,6 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     });
     logger.info({ fill }, 'Fill event');
     
-    // Emit fill to EventBus
     eventBus.emit({
         id: crypto.randomUUID(),
         type: 'order.fill',
@@ -312,9 +292,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       });
     }
 
-    // Release base asset reservation for BUY fills
     if (fill.side === 'BUY') {
-      (accountGuard as any).releaseBase?.(fill.orderId);
+      accountGuard?.releaseBase?.(fill.orderId);
     }
   });
 
@@ -325,7 +304,6 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       reconcile$?.next(order);
     }
 
-    // Emit execution reject to EventBus
     eventBus.emit({
         id: crypto.randomUUID(),
         type: 'order.reject',
@@ -349,7 +327,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     venue: instrument.venue ?? execution.adapter.id,
     accountId: config.execution.account,
     clock,
-    enqueue: (event) => eventBus.emit(event) // Route through EventBus
+    enqueue: (event) => eventBus.emit(event)
   });
 
   const balanceProviderFactory = options.dependencies?.createBalanceProvider ?? createBalanceProvider;
@@ -367,8 +345,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     accountId: config.execution.account,
     provider: balanceProvider,
     getBalance: (venue, asset) => accountState.getBalance(venue, asset),
-    enqueue: (event) => eventBus.emit(event), // Route through EventBus
-    enqueueSnapshot: (event) => eventBus.emit(event), // Route through EventBus
+    enqueue: (event) => eventBus.emit(event),
+    enqueueSnapshot: (event) => eventBus.emit(event),
     clock,
     intervalMs: config.accounting?.balanceSyncIntervalMs,
     driftBpsThreshold: driftThreshold,
@@ -396,14 +374,14 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     logger,
     metrics,
     accountId: config.execution.account,
-    enqueue: (event) => eventBus.emit(event) // Route through EventBus
+    enqueue: (event) => eventBus.emit(event)
   });
   await rebalancer.start();
 
   const transferExecutor = new TransferExecutionService({
     enabled: config.rebalancer.executor.auto,
     store,
-    enqueue: (event) => eventBus.emit(event), // Route through EventBus
+    enqueue: (event) => eventBus.emit(event),
     providers: createTransferProviders({
       mode: config.rebalancer.executor.mode,
       live,
@@ -443,8 +421,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     });
     if (accountGuard && decision.notional && decision.order.side === 'BUY') {
       accountGuard.reserve?.(decision.order.id, decision.notional);
-      // Also reserve the base asset we expect to receive
-      (accountGuard as any).reserveBase?.(decision.order.id, decision.order.qty);
+      accountGuard?.reserveBase?.(decision.order.id, decision.order.qty);
       logAudit('quote-reserve', {
         orderId: decision.order.id,
         reserved: decision.notional,
@@ -453,7 +430,6 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       });
     }
     
-    // Emit order.new to EventBus
     eventBus.emit({
       id: crypto.randomUUID(),
       type: 'order.new',
@@ -661,13 +637,6 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     stop: handleShutdown
   };
 };
-
-interface BalanceProviderFactoryInput {
-  instrument: InstrumentMetadata;
-  config: AppConfig;
-  feedManager: FeedManagerResult;
-  live: boolean;
-}
 
 const createBalanceProvider = (
   input: BalanceProviderFactoryInput

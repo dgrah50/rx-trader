@@ -88,7 +88,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
   debugLog('initialized', {
     strategyId: options.strategyId,
     symbol: options.symbol,
-    exit: options.exit
+    exit: options.exit,
   });
   const subs: Subscription[] = [];
   const cleanup: Array<() => void> = [];
@@ -122,14 +122,15 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
     const direction: 'LONG' | 'SHORT' = pos.pos > 0 ? 'LONG' : 'SHORT';
     const wasFlat = !position || position.qty === 0;
     const sameDirection = position?.direction === direction;
-    const entryTime = wasFlat || !sameDirection ? pos.t ?? options.clock.now() : position!.entryTime;
+    const entryTime =
+      wasFlat || !sameDirection ? (pos.t ?? options.clock.now()) : position!.entryTime;
     const notional = pos.notional ?? pos.px * pos.pos;
     const nextState: PositionState = {
       qty: Math.abs(pos.pos),
       avgPx: pos.avgPx,
       notional: Math.abs(notional),
       entryTime,
-      direction
+      direction,
     };
 
     if (!position || position.direction !== nextState.direction || position.qty === 0) {
@@ -167,8 +168,8 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
         reason: decision.reason,
         strategyId: options.strategyId,
         px: currentPrice.px,
-        execRefPx: currentPrice.px
-      }
+        execRefPx: currentPrice.px,
+      },
     };
     pendingExit = decision.reason;
     exitSubject.next(order);
@@ -194,7 +195,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
       debugLog('position update', pos);
       deriveCurrentPosition(pos);
       evaluate();
-    })
+    }),
   );
 
   subs.push(
@@ -203,7 +204,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
       sigmaEstimator.update(price.px);
       updateTrailingState(trailing, position, price);
       evaluate();
-    })
+    }),
   );
 
   if (options.signals$) {
@@ -214,7 +215,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
           lastSignal = signal;
           evaluate();
         }
-      })
+      }),
     );
   }
 
@@ -223,7 +224,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
       options.analytics$.subscribe((snapshot) => {
         analytics = snapshot;
         evaluate();
-      })
+      }),
     );
   }
 
@@ -236,7 +237,7 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
       debugLog('time poll tick', {
         now: options.clock.now(),
         position,
-        pendingExit
+        pendingExit,
       });
       evaluate();
     }, pollMs);
@@ -246,27 +247,21 @@ export const createExitEngine = (options: ExitEngineOptions): ExitEngineHandle =
 
   const stop = () => {
     subs.forEach((sub) => sub.unsubscribe());
-    cleanup.forEach((fn) => {
-      try {
-        fn();
-      } catch {
-        // ignore
-      }
-    });
+    cleanup.forEach((fn) => fn());
     cleanup.length = 0;
     exitSubject.complete();
   };
 
   return {
     exitIntents$: exitSubject.asObservable(),
-    stop
+    stop,
   } satisfies ExitEngineHandle;
 };
 
 const evaluateRisk = (
   position: PositionState,
   analytics: PortfolioAnalytics | null,
-  config: ExitConfig
+  config: ExitConfig,
 ): Decision | null => {
   if (!config.riskOverrides) return null;
   const overrides = config.riskOverrides;
@@ -277,24 +272,40 @@ const evaluateRisk = (
   }
 
   if (analytics) {
-    const gross = Object.values(analytics.symbols).reduce((sum, sym) => sum + Math.abs(sym.notional), 0);
+    const gross = Object.values(analytics.symbols).reduce(
+      (sum, sym) => sum + Math.abs(sym.notional),
+      0,
+    );
     if (overrides.maxGrossExposureUsd && gross > overrides.maxGrossExposureUsd) {
-      return { reason: 'EXIT_RISK_GROSS', action: overrides.action === 'FLATTEN_ALL' ? 'FLATTEN' : action };
+      return {
+        reason: 'EXIT_RISK_GROSS',
+        action: overrides.action === 'FLATTEN_ALL' ? 'FLATTEN' : action,
+      };
     }
     if (overrides.maxDrawdownPct && Math.abs(analytics.drawdownPct) > overrides.maxDrawdownPct) {
-      return { reason: 'EXIT_RISK_DRAWDOWN', action: overrides.action === 'FLATTEN_ALL' ? 'FLATTEN' : action };
+      return {
+        reason: 'EXIT_RISK_DRAWDOWN',
+        action: overrides.action === 'FLATTEN_ALL' ? 'FLATTEN' : action,
+      };
     }
     if (overrides.marginBufferPct && analytics.nav > 0) {
       const remaining = (analytics.nav - exposure) / analytics.nav;
       if (remaining < overrides.marginBufferPct) {
-        return { reason: 'EXIT_RISK_MARGIN', action: overrides.action === 'FLATTEN_ALL' ? 'FLATTEN' : action };
+        return {
+          reason: 'EXIT_RISK_MARGIN',
+          action: overrides.action === 'FLATTEN_ALL' ? 'FLATTEN' : action,
+        };
       }
     }
   }
   return null;
 };
 
-const evaluateTime = (position: PositionState, config: ExitConfig, now: number): Decision | null => {
+const evaluateTime = (
+  position: PositionState,
+  config: ExitConfig,
+  now: number,
+): Decision | null => {
   if (!config.time?.enabled || position.entryTime == null) return null;
   if (config.time.minHoldMs && now - position.entryTime < config.time.minHoldMs) {
     return null;
@@ -311,7 +322,7 @@ const evaluateFairValue = (
   price: PricePoint,
   config: ExitConfig,
   signal: StrategySignal | null,
-  now: number
+  now: number,
 ): Decision | null => {
   if (!config.fairValue?.enabled) return null;
   if (position.entryTime == null) return null;
@@ -321,12 +332,15 @@ const evaluateFairValue = (
     return null;
   }
   if (config.fairValue.closeOnSignalFlip && signal) {
-    if ((position.direction === 'LONG' && signal.action === 'SELL') || (position.direction === 'SHORT' && signal.action === 'BUY')) {
+    if (
+      (position.direction === 'LONG' && signal.action === 'SELL') ||
+      (position.direction === 'SHORT' && signal.action === 'BUY')
+    ) {
       return { reason: 'EXIT_SIGNAL_FLIP', action };
     }
   }
   if (config.fairValue.epsilonBps && signal?.px) {
-    const diffBps = Math.abs(price.px - signal.px) / signal.px * 10_000;
+    const diffBps = (Math.abs(price.px - signal.px) / signal.px) * 10_000;
     if (diffBps <= config.fairValue.epsilonBps) {
       return { reason: 'EXIT_FAIR_VALUE', action };
     }
@@ -338,7 +352,7 @@ const evaluateTpSl = (
   position: PositionState,
   price: PricePoint,
   config: ExitConfig,
-  sigma: number
+  sigma: number,
 ): Decision | null => {
   if (!config.tpSl?.enabled || sigma <= 0) return null;
   const tpSigma = config.tpSl.tpSigma ?? 1.5;
@@ -360,7 +374,7 @@ const evaluateTrailing = (
   price: PricePoint,
   config: ExitConfig,
   trailing: TrailingState,
-  sigma: number
+  sigma: number,
 ): Decision | null => {
   if (!config.trailing?.enabled) return null;
   const action: Decision['action'] = position.direction === 'LONG' ? 'CLOSE_LONG' : 'CLOSE_SHORT';
@@ -396,7 +410,7 @@ const evaluateTrailing = (
 const updateTrailingState = (
   trailing: TrailingState,
   position: PositionState | null,
-  price: PricePoint
+  price: PricePoint,
 ) => {
   if (!position || !trailing.armed) return;
   if (position.direction === 'LONG') {

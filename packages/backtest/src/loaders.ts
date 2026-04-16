@@ -3,7 +3,7 @@ import { resolve, extname } from 'node:path';
 import type { MarketTick } from '@rx-trader/core/domain';
 import { Database } from 'duckdb';
 
-interface TickDatasetMetadata {
+export interface TickDatasetMetadata {
   format: 'json' | 'csv' | 'parquet';
   source: string;
   count: number;

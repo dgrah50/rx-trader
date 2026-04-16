@@ -1,29 +1,4 @@
-import type { DomainEvent, Fill } from '@rx-trader/core/domain';
-
-type TradeDirection = 'LONG' | 'SHORT';
-
-export interface ClosedTrade {
-  symbol: string;
-  qty: number;
-  entryPx: number;
-  exitPx: number;
-  entryTs: number;
-  exitTs: number;
-  realizedPnl: number;
-  fees: number;
-  direction: TradeDirection;
-}
-
-export interface OpenTrade {
-  symbol: string;
-  qty: number;
-  avgPx: number;
-  entryTs: number;
-  markPx: number;
-  unrealizedPnl: number;
-  fees: number;
-  direction: TradeDirection;
-}
+import type { DomainEvent, Fill, ClosedTrade, OpenTrade, TradeDirection, TradesResponse } from '@rx-trader/core/domain';
 
 interface TradeState {
   qty: number;
@@ -34,22 +9,10 @@ interface TradeState {
 
 const directionFromQty = (qty: number): TradeDirection => (qty >= 0 ? 'LONG' : 'SHORT');
 
-type PositionMarkShape = {
-  symbol?: string;
-  pos?: number;
-  avgPx?: number;
-  px?: number;
-  t?: number;
-  realized?: number;
-  unrealized?: number;
-  notional?: number;
-  pnl?: number;
-};
-
 export const buildTradeJournal = (
   events: DomainEvent[],
-  marks: Record<string, Partial<PositionMarkShape>>
-): { open: OpenTrade[]; closed: ClosedTrade[] } => {
+  marks: Record<string, Partial<{ px: number }>>
+): TradesResponse => {
   const fillEvents = events
     .filter((event) => event.type === 'order.fill')
     .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
@@ -148,7 +111,7 @@ export const buildTradeJournal = (
       return {
         symbol,
         qty: Math.abs(state.qty),
-        avgPx: state.avgPx,
+        entryPx: state.avgPx,
         entryTs: state.entryTs,
         markPx: mark,
         unrealizedPnl,

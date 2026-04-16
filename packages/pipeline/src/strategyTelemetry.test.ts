@@ -23,7 +23,6 @@ describe('createStrategyTelemetry', () => {
     const eventBus = new EventBus();
     const telemetry = createStrategyTelemetry({ strategies: [definition], eventBus });
 
-    // Emit signals and intents via EventBus
     eventBus.emit({
       id: 'sig-1',
       type: 'strategy.signal',
@@ -44,8 +43,6 @@ describe('createStrategyTelemetry', () => {
     });
 
     const orderId = 'order-1';
-    // Use recordOrder which now emits to bus (or emit directly to bus to test decoupling)
-    // Let's use recordOrder to verify backward compat/convenience, but also verify bus listening.
     telemetry.recordOrder({
       id: orderId,
       t: Date.now(),
@@ -93,7 +90,7 @@ describe('createStrategyTelemetry', () => {
     expect(metrics.rejects).toBe(1);
   });
 
-  it('uses symbol fallbacks when strategy metadata is missing', () => {
+  it('resolves strategy IDs from symbol when metadata is missing', () => {
     const definition = createDefinition('strat-B');
     const eventBus = new EventBus();
     const telemetry = createStrategyTelemetry({ strategies: [definition], eventBus });

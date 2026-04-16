@@ -5,7 +5,7 @@ import type {
   OrderNew,
   OrderAck,
   OrderReject,
-  OrderCancelReq
+  OrderCancelReq,
 } from '@rx-trader/core/domain';
 import { ExecutionVenue } from '@rx-trader/core/constants';
 import { createHmac } from 'node:crypto';
@@ -34,21 +34,24 @@ const DEFAULT_RETRY_OPTIONS: RetryOptions = {
   maxAttempts: 3,
   baseDelayMs: 500,
   maxDelayMs: 10_000,
-  jitter: 0.3
+  jitter: 0.3,
 };
 
-const withRetry = async <T>(fn: () => Promise<T>, options: RetryOptions = DEFAULT_RETRY_OPTIONS) => {
+const withRetry = async <T>(
+  fn: () => Promise<T>,
+  options: RetryOptions = DEFAULT_RETRY_OPTIONS,
+) => {
   let attempt = 0;
-  let lastError: unknown;
+  let lastError: Error | undefined;
   while (attempt < options.maxAttempts) {
     try {
       return await fn();
     } catch (error) {
-      lastError = error;
+      lastError = error instanceof Error ? error : new Error(String(error));
       attempt += 1;
       const retryable = (error as ExecutionRetryError)?.retryable ?? true;
       if (!retryable || attempt >= options.maxAttempts) {
-        throw error;
+        throw lastError;
       }
       const backoff = Math.min(options.maxDelayMs, options.baseDelayMs * Math.pow(2, attempt - 1));
       const jitterRange = backoff * options.jitter;
@@ -86,7 +89,7 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
       id: crypto.randomUUID(),
       type: 'order.ack',
       ts,
-      data: payload
+      data: payload,
     });
   }
 
@@ -102,8 +105,8 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
         symbol: overrides.symbol ?? order.symbol,
         px: overrides.px ?? order.px ?? 100,
         qty: overrides.qty ?? order.qty,
-        side: overrides.side ?? order.side
-      }
+        side: overrides.side ?? order.side,
+      },
     } as ExecEvent);
   }
 
@@ -113,7 +116,7 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
       id: crypto.randomUUID(),
       type: 'order.cancel',
       ts,
-      data: payload
+      data: payload,
     } as ExecEvent);
   }
 
@@ -123,7 +126,7 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
       id: crypto.randomUUID(),
       type: 'order.reject',
       ts,
-      data: payload
+      data: payload,
     });
   }
 
@@ -144,57 +147,50 @@ export class PaperExecutionAdapter extends BaseExecutionAdapter {
    * - Roundtrip latency (jittered delay)
    * - Price slippage for market orders
    * - Fill price variation for limit orders
-   */
+  */
   async submit(order: OrderNew) {
-    const ts = this.clock.now();
-    
     // Simulate network roundtrip to exchange (30-150ms typical for Binance)
     const baseLatencyMs = 50;
     const jitterMs = Math.random() * 100; // 0-100ms jitter
     const latencyMs = baseLatencyMs + jitterMs;
-    
+
     // Emit ACK after small delay
     await delay(latencyMs * 0.3); // ACK comes back quickly
     this.ack(order.id, this.clock.now());
-    
+
     // Determine execution price with realistic slippage
-    const metaRecord = order.meta as Record<string, unknown> | undefined;
-    const metaPx = typeof metaRecord?.execRefPx === 'number' ? (metaRecord.execRefPx as number) : undefined;
+    const metaPx = order.meta?.execRefPx;
     const refPrice = metaPx ?? order.px ?? 100;
-    
+
     let fillPrice = refPrice;
-    
+
     if (order.type === 'MKT') {
       // Market orders: simulate slippage based on spread and urgency
       // Typical Binance BTC spread: 0.01-0.05% (1-5 bps)
       const spreadBps = 2 + Math.random() * 3; // 2-5 bps spread
       const slippageBps = spreadBps * (0.5 + Math.random()); // Pay partial spread
       const slippagePct = slippageBps / 10000;
-      
+
       // BUY pays ask (higher), SELL receives bid (lower)
-      fillPrice = order.side === 'BUY' 
-        ? refPrice * (1 + slippagePct)
-        : refPrice * (1 - slippagePct);
+      fillPrice =
+        order.side === 'BUY' ? refPrice * (1 + slippagePct) : refPrice * (1 - slippagePct);
     } else {
       // Limit orders: small variation around limit price (maker fills)
       // Simulate favorable fill due to price improvement
       const improvementBps = Math.random() * 1; // 0-1 bps improvement
       const improvementPct = improvementBps / 10000;
-      
-      fillPrice = order.side === 'BUY'
-        ? refPrice * (1 - improvementPct) // Buy lower
-        : refPrice * (1 + improvementPct); // Sell higher
+
+      fillPrice =
+        order.side === 'BUY'
+          ? refPrice * (1 - improvementPct) // Buy lower
+          : refPrice * (1 + improvementPct); // Sell higher
     }
-    
+
     // Wait for remaining latency before fill
     await delay(latencyMs * 0.7);
-    
+
     // Generate fill with simulated execution price
-    this.fill(
-      order,
-      { px: fillPrice },
-      this.clock.now()
-    );
+    this.fill(order, { px: fillPrice }, this.clock.now());
   }
 }
 
@@ -207,7 +203,7 @@ export class BinanceMockGateway extends BaseExecutionAdapter {
     const ts = this.clock.now();
     this.ack(order.id, ts);
     const expectedPx = Number(
-      typeof order.meta?.expectedPx === 'number' ? order.meta.expectedPx : NaN
+      typeof order.meta?.expectedPx === 'number' ? order.meta.expectedPx : NaN,
     );
     const price = order.px ?? (Number.isFinite(expectedPx) ? expectedPx : 100);
     this.fill(order, { px: price }, ts + 5);
@@ -238,7 +234,10 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
   private readonly baseUrl: string;
   private readonly orderSymbols = new Map<string, string>();
 
-  constructor(private readonly config: BinanceRestGatewayConfig, clock?: Clock) {
+  constructor(
+    private readonly config: BinanceRestGatewayConfig,
+    clock?: Clock,
+  ) {
     super(ExecutionVenue.Binance, clock);
     this.baseUrl = config.baseUrl ?? 'https://api.binance.com';
   }
@@ -256,7 +255,7 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
       side: order.side,
       type: order.type === 'LMT' ? 'LIMIT' : 'MARKET',
       quantity: order.qty.toString(),
-      timestamp: this.clock.now().toString()
+      timestamp: this.clock.now().toString(),
     });
     if (order.type === 'LMT') {
       params.set('price', (order.px ?? 0).toString());
@@ -274,12 +273,12 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
           method: 'POST',
           headers: {
             'X-MBX-APIKEY': this.config.apiKey,
-            'content-type': 'application/x-www-form-urlencoded'
+            'content-type': 'application/x-www-form-urlencoded',
           },
-          body: params.toString()
+          body: params.toString(),
         });
         if (!res.ok) {
-          const payload = await res.text().catch(() => '');
+          const payload = await res.text();
           const reason = payload || res.statusText;
           if (shouldRetryStatus(res.status)) {
             throw new ExecutionRetryError(`Binance retryable error: ${reason}`, true);
@@ -288,9 +287,14 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
         }
         return res;
       });
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json()) as {
+        transactTime?: number;
+        status?: string;
+        price?: string | number;
+        avgPrice?: string | number;
+      };
       this.orderSymbols.set(order.id, order.symbol.toUpperCase());
-    const ts = data.transactTime ?? this.clock.now();
+      const ts = data.transactTime ?? this.clock.now();
       this.ack(order.id, ts);
       if (data.status === 'FILLED') {
         const px = Number(data.price) || order.px || Number(data.avgPrice) || 0;
@@ -298,7 +302,9 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
       }
     } catch (error) {
       const reason =
-        error instanceof ExecutionRetryError ? error.message : (error as Error)?.message ?? 'Submit failed';
+        error instanceof ExecutionRetryError
+          ? error.message
+          : ((error as Error)?.message ?? 'Submit failed');
       this.reject(order.id, reason);
       throw error;
     }
@@ -312,18 +318,18 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
     const params = new URLSearchParams({
       symbol,
       timestamp: this.clock.now().toString(),
-      origClientOrderId: orderId
+      origClientOrderId: orderId,
     });
     this.sign(params);
     await withRetry(async () => {
       const res = await fetch(`${this.baseUrl}/api/v3/order?${params.toString()}`, {
         method: 'DELETE',
         headers: {
-          'X-MBX-APIKEY': this.config.apiKey
-        }
+          'X-MBX-APIKEY': this.config.apiKey,
+        },
       });
       if (!res.ok) {
-        const payload = await res.text().catch(() => '');
+        const payload = await res.text();
         const reason = payload || res.statusText;
         if (shouldRetryStatus(res.status)) {
           throw new ExecutionRetryError(`Binance cancel retryable error: ${reason}`, true);
@@ -344,7 +350,10 @@ export interface HyperliquidRestGatewayConfig {
 export class HyperliquidRestGateway extends BaseExecutionAdapter {
   private readonly baseUrl: string;
 
-  constructor(private readonly config: HyperliquidRestGatewayConfig, clock?: Clock) {
+  constructor(
+    private readonly config: HyperliquidRestGatewayConfig,
+    clock?: Clock,
+  ) {
     super(ExecutionVenue.Hyperliquid, clock);
     this.baseUrl = config.baseUrl ?? 'https://api.hyperliquid.xyz';
   }
@@ -358,12 +367,12 @@ export class HyperliquidRestGateway extends BaseExecutionAdapter {
         headers: {
           'content-type': 'application/json',
           'x-api-key': this.config.apiKey,
-          'x-signature': signature
+          'x-signature': signature,
         },
-        body: payload
+        body: payload,
       });
       if (!res.ok) {
-        const text = await res.text().catch(() => '');
+        const text = await res.text();
         const reason = text || res.statusText;
         if (shouldRetryStatus(res.status)) {
           throw new ExecutionRetryError(`Hyperliquid retryable error: ${reason}`, true);
@@ -382,17 +391,25 @@ export class HyperliquidRestGateway extends BaseExecutionAdapter {
         size: order.qty,
         type: order.type === 'LMT' ? 'limit' : 'market',
         price: order.px ?? null,
-        tif: order.tif
+        tif: order.tif,
       });
-      const data = await response.json().catch(() => ({}));
+      const data = (await response.json()) as {
+        timestamp?: number;
+        status?: string;
+        filledSize?: number | string | null;
+        price?: string | number;
+      };
       const ts = data.timestamp ?? this.clock.now();
       this.ack(order.id, ts);
-      if (data.status === 'filled' || data.filledSize) {
-        this.fill(order, { px: data.price ?? order.px }, ts);
+      if (data.status === 'filled' || data.filledSize != null) {
+        const px = Number(data.price) || order.px || 0;
+        this.fill(order, { px }, ts);
       }
     } catch (error) {
       const reason =
-        error instanceof ExecutionRetryError ? error.message : (error as Error)?.message ?? 'Submit failed';
+        error instanceof ExecutionRetryError
+          ? error.message
+          : ((error as Error)?.message ?? 'Submit failed');
       this.reject(order.id, reason);
       throw error;
     }

@@ -3,10 +3,11 @@ import type { DomainEvent } from '@rx-trader/core/domain';
 import type { EventStore } from './eventStore';
 import { createSharedEventQueue, type SharedQueueProducer } from './sharedEventQueue';
 import type { Metrics } from '@rx-trader/observability/metrics';
+import type { Logger } from 'pino';
 
 interface PersistenceManagerOptions {
   store: EventStore;
-  logger: ReturnType<typeof console.log> extends never ? never : any;
+  logger?: Pick<Logger, 'info' | 'warn' | 'error'>;
   workerPath: string;
   envSnapshot?: Record<string, string | undefined>;
   queueCapacity?: number;

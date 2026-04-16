@@ -3,6 +3,7 @@ import type { Fill } from '@rx-trader/core/domain';
 import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
 import { safeParse } from '@rx-trader/core/validation';
+import type { AccountBalanceAdjustedEventData } from './balances/types';
 
 interface FillAccountingOptions {
   fills$: Observable<Fill>;
@@ -13,7 +14,7 @@ interface FillAccountingOptions {
   enqueue: (event: {
     id: string;
     type: 'account.balance.adjusted';
-    data: unknown;
+    data: AccountBalanceAdjustedEventData;
     ts: number;
   }) => void;
   clock: Clock;

@@ -22,7 +22,6 @@ import {
   accountTransferSchema
 } from './account';
 
-// Export for shared usage across frontend/backend
 export const domainEventTypes = [
   'market.tick',
   'market.bar',
@@ -48,7 +47,6 @@ export const domainEventTypes = [
 
 export type DomainEventType = (typeof domainEventTypes)[number];
 
-// Type-safe event type constants (alternative to magic strings)
 export const EVENT_TYPE = {
   MARKET_TICK: 'market.tick' as const,
   MARKET_BAR: 'market.bar' as const,
@@ -81,8 +79,6 @@ export interface DomainEvent<TType extends DomainEventType = DomainEventType, TD
   metadata?: Record<string, unknown>;
 }
 
-// --- New Schemas ---
-
 export const strategySignalSchema = z.object({
   strategyId: z.string(),
   symbol: z.string(),
@@ -106,11 +102,9 @@ export const riskCheckSchema = z.object({
   orderId: z.string(),
   passed: z.boolean(),
   reasons: z.array(z.string()).optional(),
-  snapshot: z.record(z.unknown()).optional(), // Snapshot of relevant state (balances, margin, etc.)
+  snapshot: z.record(z.unknown()).optional(),
   metadata: z.record(z.unknown()).optional()
 });
-
-// -------------------
 
 const domainEventSchema = z.object({
   id: uuidSchema,

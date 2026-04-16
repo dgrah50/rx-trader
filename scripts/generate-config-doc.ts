@@ -26,7 +26,7 @@ const CONFIG_DOCS: Record<string, ConfigDocEntry> = {
     example: '8080'
   },
   ORCHESTRATOR_PORT: {
-    description: 'Legacy gateway port (kept for backwards compatibility).',
+    description: 'Port for the orchestrator HTTP server.',
     example: '8090'
   },
   PG_URL: { description: 'Postgres connection string when `EVENT_STORE_DRIVER=postgres`.' },

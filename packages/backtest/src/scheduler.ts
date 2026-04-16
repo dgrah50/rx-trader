@@ -18,9 +18,7 @@ export class BacktestScheduler implements SchedulerLike, Clock {
     this.currentTime = timestamp;
   };
 
-  flush = () => {
-    // no queued work yet; placeholder for future scheduler tasks
-  };
+  flush = () => {};
 
   schedule: SchedulerLike['schedule'] = <T>(
     work: (this: SchedulerAction<T>, state?: T) => void,

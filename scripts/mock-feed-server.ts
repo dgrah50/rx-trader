@@ -33,7 +33,7 @@ export const startMockFeedServer = (options: MockFeedServerOptions) => {
     port: options.port,
     idleTimeout: 0,
     fetch(req, server) {
-      if (server.upgrade(req, { data: undefined as unknown })) {
+      if (server.upgrade(req, { data: undefined })) {
         return new Response(null, { status: 101 });
       }
       return new Response('WebSocket feed only', { status: 400 });

@@ -61,7 +61,6 @@ export function StrategyFlowTab({ strategies: rawStrategies }: StrategyFlowTabPr
       {selectedNode && selectedStrategyId && (
         <div className="animate-in slide-in-from-bottom-10 duration-300">
           <NodeDetailsPanel 
-            strategyId={selectedStrategyId} 
             nodeType={selectedNode}
             onClose={() => setSelectedNode(null)} 
           />

@@ -9,11 +9,7 @@ const binDir = path.join(bunHome, 'bin');
 const isWindows = process.platform === 'win32';
 
 const ensureDir = () => {
-  try {
-    mkdirSync(binDir, { recursive: true });
-  } catch {
-    // ignore
-  }
+  mkdirSync(binDir, { recursive: true });
 };
 
 const quote = (value: string) => value.replace(/"/g, '\\"');
@@ -33,8 +29,4 @@ const install = () => {
   console.log(`[setup] Installed rx shim at ${shimPath}`);
 };
 
-try {
-  install();
-} catch (error) {
-  console.warn('[setup] Failed to install rx shim:', (error as Error).message);
-}
+install();

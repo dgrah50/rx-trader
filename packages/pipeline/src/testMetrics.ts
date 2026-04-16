@@ -179,7 +179,6 @@ export const createTestMetrics = (): TestMetrics => {
     executionStaleIntents: createCounterStub('executionStaleIntents', state),
     eventStoreAppendDuration: createHistogramStub('eventStoreAppendDuration', state),
     eventStoreReadDuration: createHistogramStub('eventStoreReadDuration', state),
-    // Balance sync + rebalancer/accounting metrics used by runtime services
     balanceSyncFailures: createCounterStub('balanceSyncFailures', state),
     balanceSyncStatus: createGaugeStub('balanceSyncStatus', state),
     balanceSyncLastSuccess: createGaugeStub('balanceSyncLastSuccess', state),

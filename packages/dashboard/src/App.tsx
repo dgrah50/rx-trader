@@ -55,7 +55,6 @@ export const App = () => {
     setSelectedStrategyId,
     aggregatedMetrics,
     options: strategyOptions,
-    focusLabel,
   } = useStrategySelection(statusData?.runtime.strategies);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -130,17 +129,17 @@ export const App = () => {
   const summarizedOrders = useMemo(() => {
     return recentOrders.map((order) => {
       const data = (order.data ?? {}) as Record<string, unknown>;
-      const meta = (data.meta as Record<string, unknown>) ?? {};
+      const meta = isRecord(data.meta) ? data.meta : {};
       return {
         id: order.id,
         ts: order.ts,
         type: order.type,
         summary: {
-          symbol: (data.symbol ?? meta.symbol ?? '—') as string,
-          side: (data.side ?? meta.side ?? '—') as string,
-          qty: (data.qty ?? meta.qty ?? meta.size ?? null) as number | null,
-          px: (data.px ?? meta.execRefPx ?? meta.px ?? null) as number | null,
-          strategyId: (meta.strategyId as string | undefined) ?? null,
+          symbol: typeof data.symbol === 'string' ? data.symbol : typeof meta.symbol === 'string' ? meta.symbol : '—',
+          side: typeof data.side === 'string' ? data.side : typeof meta.side === 'string' ? meta.side : '—',
+          qty: numberOrNull(data.qty ?? meta.qty ?? meta.size),
+          px: numberOrNull(data.px ?? meta.execRefPx ?? meta.px),
+          strategyId: typeof meta.strategyId === 'string' ? meta.strategyId : null,
         },
       };
     });
@@ -155,7 +154,7 @@ export const App = () => {
     });
   }, [summarizedOrders, selectedStrategy]);
 
-  const balanceRows = useMemo<Array<BalanceEntry & { venue: string }>>(() => {
+  const balanceRows = useMemo<Array<BalanceEntry>>(() => {
     if (!accountBalances?.balances) return [];
     return Object.entries(accountBalances.balances)
       .flatMap(([venue, assets]) =>
@@ -210,7 +209,6 @@ export const App = () => {
 
   return (
     <div className="flex h-screen w-full bg-background text-xs overflow-hidden">
-      {/* Main App Content */}
       <div className="flex flex-col flex-1 overflow-hidden transition-all duration-300">
       <div className="border-b p-2">
         <StatusHeader
@@ -243,7 +241,6 @@ export const App = () => {
 
           <TabsContent value="live" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
             <div className="flex h-full gap-2">
-              {/* Left Column: Strategy & Control (Fixed Width) */}
               <div className="flex flex-col gap-2 w-[320px] shrink-0 overflow-hidden">
                 <div className="flex-1 overflow-y-auto">
                   <StrategyMixerCard
@@ -251,7 +248,6 @@ export const App = () => {
                     selectedStrategyId={selectedStrategyId}
                     onSelect={handleStrategySelect}
                     options={strategyOptions}
-                    focusLabel={focusLabel}
                     aggregatedMetrics={aggregatedMetrics}
                     selectedStrategy={selectedStrategy}
                     formatAgo={formatAgo}
@@ -268,10 +264,8 @@ export const App = () => {
                 </div>
               </div>
 
-              {/* Main Content Area (Flex Grow) */}
               <div className="flex-1 grid grid-cols-12 gap-2 overflow-hidden">
 
-              {/* Middle Column: Market Data (6 cols) */}
               <div className="col-span-6 flex flex-col gap-2 overflow-hidden">
                 <div className="shrink-0">
                   <PortfolioOverviewCard
@@ -302,7 +296,6 @@ export const App = () => {
                 </div>
               </div>
 
-              {/* Right Column: Account & Logs (3 cols) */}
               <div className="col-span-6 flex flex-col gap-2 overflow-hidden">
                 <div className="h-1/3 overflow-y-auto">
                   <PnlTimelineCard history={pnlHistory} />
@@ -359,7 +352,6 @@ export const App = () => {
       </div>
     </div>
 
-    {/* Full-Height Inline Details Panel */}
     {isSidebarOpen && (
       <div className="w-[400px] border-l border-border bg-card/50 overflow-y-auto animate-in slide-in-from-right duration-300">
         <div className="p-4">
@@ -389,3 +381,13 @@ export const App = () => {
   </div>
   );
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const numberOrNull = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : typeof value === 'string' && value.trim().length && Number.isFinite(Number(value))
+      ? Number(value)
+      : null;

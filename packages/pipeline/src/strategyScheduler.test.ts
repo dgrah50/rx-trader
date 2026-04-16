@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { firstValueFrom, of } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { EventBus } from '@rx-trader/core';
 import type { ExecutionPolicyConfig, StrategyDefinition } from '@rx-trader/config';
 import { FeedType, StrategyType } from '@rx-trader/core/constants';
 import type { FeedManagerResult } from './feedManager';
@@ -57,12 +58,6 @@ const makeFeedManager = (symbol: string): FeedManagerResult => ({
   sources: [],
   stop: () => {}
 });
-
-import { EventBus } from '@rx-trader/core';
-
-// ... existing imports
-
-// ... existing setup
 
 describe('createStrategyOrchestrator', () => {
   const signalStream = of<StrategySignal>({

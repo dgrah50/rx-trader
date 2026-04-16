@@ -3,7 +3,7 @@ import type { RebalanceTarget } from './types';
 import { balancesProjection, buildProjection } from '@rx-trader/event-store';
 import type { EventStore } from '@rx-trader/event-store';
 import type { LoggerInstance, MetricsInstance } from '@rx-trader/pipeline';
-import type { DomainEvent } from '@rx-trader/core/domain';
+import type { AccountTransfer, DomainEvent } from '@rx-trader/core/domain';
 import { safeParse } from '@rx-trader/core/validation';
 import { accountTransferSchema } from '@rx-trader/core/domain';
 
@@ -14,10 +14,10 @@ interface RebalanceServiceOptions {
   logger: LoggerInstance;
   metrics: MetricsInstance;
   accountId: string;
-  enqueue: (event: DomainEvent) => void;
+  enqueue: (event: DomainEvent<'account.transfer.requested', AccountTransfer>) => void;
 }
 
-interface RebalanceTelemetry {
+export interface RebalanceTelemetry {
   lastRunMs: number | null;
   lastPlan?: ReturnType<typeof planRebalance>;
 }

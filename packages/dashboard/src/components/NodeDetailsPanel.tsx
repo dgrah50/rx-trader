@@ -6,47 +6,41 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventMessage } from '../types';
 import { EVENT_TYPE } from '@rx-trader/core';
+import type { Fill, OrderNew, OrderReject } from '@rx-trader/core/domain';
 
 interface NodeDetailsPanelProps {
-  strategyId: string;
   nodeType: 'feed' | 'strategy' | 'intent' | 'risk' | 'execution';
   onClose: () => void;
 }
 
-export function NodeDetailsPanel({ strategyId, nodeType, onClose }: NodeDetailsPanelProps) {
-  const recentEvents = useDashboardStore((state: any) => state.recentEvents as EventMessage[]);
+export function NodeDetailsPanel({ nodeType, onClose }: NodeDetailsPanelProps) {
+  const recentEvents = useDashboardStore((state) => state.recentEvents);
 
   const filteredEvents = recentEvents.filter((event: EventMessage) => {
-    // Filter by strategy ID if available in metadata (not all events have it, but order events usually do)
-    // For now, we'll assume events are relevant if they match the type, as we don't strictly enforce strategyId on all events yet.
-    // In a real scenario, we'd filter by strategyId.
-    
     switch (nodeType) {
       case 'feed':
-        // Feed events (ticks) are not usually persisted due to volume.
-        // We might show feed health status here instead in the future.
-        return false; 
+        return false;
       case 'strategy':
       case 'intent':
         return event.type === EVENT_TYPE.ORDER_NEW;
       case 'risk':
         return (
           event.type === EVENT_TYPE.RISK_CHECK ||
-          (event.type === EVENT_TYPE.ORDER_REJECT && (event.metadata?.risk === true || (event.data as any)?.reason?.includes('risk')))
+          (event.type === EVENT_TYPE.ORDER_REJECT &&
+            (event.metadata?.risk === true ||
+              (() => {
+                const data = event.data as Record<string, unknown> | undefined;
+                return typeof data?.reason === 'string' && data.reason.includes('risk');
+              })()))
         );
       case 'execution':
-        return event.type === EVENT_TYPE.ORDER_FILL || event.type === EVENT_TYPE.ORDER_REJECT; // Execution rejects
+        return event.type === EVENT_TYPE.ORDER_FILL || event.type === EVENT_TYPE.ORDER_REJECT;
       default:
         return false;
     }
   });
 
-  // Further filter for Risk to prioritize rejections if that's the focus, or show both.
-  // Let's show Rejections primarily for Risk node as requested previously, but maybe "Passed" events are useful too.
-  // For now, let's stick to the logic that was working for Risk, but expanded.
-  
-  // Show all risk check events (both passed and rejected) for the Risk node
-  const displayEvents = nodeType === 'risk' 
+  const displayEvents = nodeType === 'risk'
     ? filteredEvents.filter((e: EventMessage) => e.type === EVENT_TYPE.RISK_CHECK || e.type === EVENT_TYPE.ORDER_REJECT)
     : filteredEvents;
 
@@ -103,8 +97,14 @@ function EventRow({ event }: { event: EventMessage }) {
   const isRiskCheck = event.type === EVENT_TYPE.RISK_CHECK;
   
   if (isRiskCheck) {
-    const data = event.data as any;
+    const data = event.data as {
+      orderId: string;
+      passed: boolean;
+      reasons?: string[];
+    } | undefined;
+    if (!data) return null;
     const passed = data.passed;
+    const reasons = Array.isArray(data.reasons) ? data.reasons : [];
     return (
       <div className="flex items-center justify-between p-2 rounded bg-background/50 border border-border/50 text-xs">
         <div className="flex items-center gap-2">
@@ -114,9 +114,7 @@ function EventRow({ event }: { event: EventMessage }) {
           <span className="font-mono text-muted-foreground">{data.orderId.slice(0, 8)}</span>
         </div>
         <div className="flex items-center gap-2">
-           {!passed && data.reasons?.length > 0 && (
-             <span className="text-destructive">{data.reasons.join(', ')}</span>
-           )}
+           {!passed && reasons.length > 0 && <span className="text-destructive">{reasons.join(', ')}</span>}
            <span className="text-muted-foreground text-[10px]">{format(new Date(event.ts), 'HH:mm:ss.SSS')}</span>
         </div>
       </div>
@@ -133,16 +131,16 @@ function EventRow({ event }: { event: EventMessage }) {
           {isReject ? 'REJECT' : isFill ? 'FILL' : event.type.split('.')[1].toUpperCase()}
         </Badge>
         <span className="font-mono text-muted-foreground">
-          {(event.data as any)?.id?.slice(0, 8) || (event.data as any)?.orderId?.slice(0, 8) || event.id.slice(0, 8)}
+          {getEventDisplayId(event) || event.id.slice(0, 8)}
         </span>
       </div>
       <div className="flex items-center gap-2">
         {isReject && (
-          <span className="text-destructive">{(event.data as any)?.message || (event.data as any)?.reason || 'Unknown'}</span>
+          <span className="text-destructive">{getRejectMessage(event) ?? 'Unknown'}</span>
         )}
         {isFill && (
           <span className="text-green-400">
-            {(event.data as any)?.qty} @ {(event.data as any)?.price}
+            {getFillQuantity(event)} @ {getFillPrice(event)}
           </span>
         )}
         <span className="text-muted-foreground text-[10px]">{format(new Date(event.ts), 'HH:mm:ss.SSS')}</span>
@@ -151,28 +149,37 @@ function EventRow({ event }: { event: EventMessage }) {
   );
 }
 
-function renderEventDetails(event: EventMessage) {
-  const data = event.data as any;
-  
-  if (event.type === 'order.reject') {
-    return <span className="text-red-400">{data.reason || 'Unknown reason'}</span>;
-  }
-  
-  if (event.type === 'order.fill') {
-    return (
-      <span className="text-emerald-400">
-        Filled {data.qty} @ {data.px} ({data.side})
-      </span>
-    );
-  }
+const getEventData = <T extends object>(event: EventMessage): T | null =>
+  event.data && typeof event.data === 'object' ? (event.data as T) : null;
 
-  if (event.type === 'order.new') {
-    return (
-      <span className="text-blue-300">
-        {data.side} {data.qty} @ {data.px ?? 'MKT'}
-      </span>
-    );
+const getEventDisplayId = (event: EventMessage): string | null => {
+  if (event.type === EVENT_TYPE.ORDER_REJECT) {
+    const data = getEventData<OrderReject>(event);
+    return data?.id?.slice(0, 8) ?? null;
   }
+  if (event.type === EVENT_TYPE.ORDER_FILL) {
+    const data = getEventData<Fill>(event);
+    return data?.orderId?.slice(0, 8) ?? null;
+  }
+  if (event.type === EVENT_TYPE.ORDER_NEW) {
+    const data = getEventData<OrderNew>(event);
+    return data?.id?.slice(0, 8) ?? null;
+  }
+  const data = getEventData<{ orderId?: string }>(event);
+  return data?.orderId?.slice(0, 8) ?? null;
+};
 
-  return <span className="text-muted-foreground">{JSON.stringify(data)}</span>;
-}
+const getRejectMessage = (event: EventMessage): string | null => {
+  const data = getEventData<OrderReject & { message?: string }>(event);
+  return data?.message ?? data?.reason ?? null;
+};
+
+const getFillQuantity = (event: EventMessage): number | string | null => {
+  const data = getEventData<Fill>(event);
+  return data?.qty ?? null;
+};
+
+const getFillPrice = (event: EventMessage): number | string | null => {
+  const data = getEventData<Fill>(event);
+  return data?.px ?? null;
+};

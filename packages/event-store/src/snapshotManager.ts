@@ -2,23 +2,11 @@ import { dirname } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { EventStore } from './eventStore';
 import { positionsProjection, balancesProjection } from './projections';
-import type { BalanceEntry } from '@rx-trader/core/domain';
+import type { BalanceEntry, PositionMark } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
 
-type SnapshotPosition = {
-  symbol?: string;
-  pos?: number;
-  avgPx?: number;
-  px?: number;
-  t?: number;
-  realized?: number;
-  netRealized?: number;
-  grossRealized?: number;
-  unrealized?: number;
-  notional?: number;
-  pnl?: number;
-};
+type SnapshotPosition = PositionMark;
 
 export interface PositionsSnapshot {
   ts: number;
@@ -54,7 +42,8 @@ export const savePositionsSnapshot = async (
   clockMeta?: SnapshotClockMetaInput
 ) => {
   const events = await store.read();
-  const positionsState = events.reduce(positionsProjection.reduce, positionsProjection.init());
+  const initialPositions = positionsProjection.init();
+  const positionsState = events.reduce((state, event) => positionsProjection.reduce(state, event), initialPositions);
   const balancesState = events.reduce(balancesProjection.reduce, balancesProjection.init());
   const captured = clock.now();
   const snapshot: PositionsSnapshot = {
@@ -84,12 +73,11 @@ export const replayPositionsFromSnapshot = async (
 ) => {
   const events = await store.read(snapshot.ts);
   const positionsState = events.reduce(
-    positionsProjection.reduce,
-    { positions: { ...snapshot.positions } }
+    (state, event) => positionsProjection.reduce(state, event),
+    { positions: { ...snapshot.positions } as Record<string, PositionMark> }
   );
-  const balancesState = events.reduce(
-    balancesProjection.reduce,
-    { balances: { ...snapshot.balances } }
-  );
+  const balancesState = events.reduce((state, event) => balancesProjection.reduce(state, event), {
+    balances: { ...snapshot.balances }
+  });
   return { positions: positionsState.positions, balances: balancesState.balances };
 };

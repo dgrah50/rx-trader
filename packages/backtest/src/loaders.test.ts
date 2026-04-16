@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { Database } from 'duckdb';
 import { loadTicks } from './loaders';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -14,6 +15,28 @@ const sampleTicks = [
   { t: 1, symbol: 'SIM', bid: 100, ask: 100.1, last: 100.05 },
   { t: 2, symbol: 'SIM', bid: 101, ask: 101.1, last: 101.05 }
 ];
+
+const writeParquetFixture = async (file: string) => {
+  const db = new Database(':memory:');
+  const conn = db.connect();
+  try {
+    const escaped = file.replace(/'/g, "''");
+    await new Promise<void>((resolveQuery, reject) => {
+      conn.run(
+        `COPY (
+          SELECT 1::BIGINT AS t, 'ETHUSDT' AS symbol, 2000.0 AS bid, 2001.0 AS ask, 2000.5 AS last
+        ) TO '${escaped}' (FORMAT PARQUET)`,
+        (err) => {
+          if (err) reject(err);
+          else resolveQuery();
+        }
+      );
+    });
+  } finally {
+    conn.close();
+    db.close();
+  }
+};
 
 describe('loadTicks', () => {
   it('loads JSON datasets with metadata and respects limit', async () => {
@@ -35,9 +58,16 @@ describe('loadTicks', () => {
   });
 
   it('loads Parquet datasets via DuckDB', async () => {
-    const dataset = await loadTicks(fixture('ticks.parquet'), { symbol: 'ETHUSDT' });
-    expect(dataset.ticks).toHaveLength(1);
-    expect(dataset.ticks[0].symbol).toBe('ETHUSDT');
-    expect(dataset.metadata.format).toBe('parquet');
+    const dir = mkdtempSync(join(tmpdir(), 'rx-parquet-'));
+    try {
+      const file = join(dir, 'ticks.parquet');
+      await writeParquetFixture(file);
+      const dataset = await loadTicks(file, { symbol: 'ETHUSDT' });
+      expect(dataset.ticks).toHaveLength(1);
+      expect(dataset.ticks[0].symbol).toBe('ETHUSDT');
+      expect(dataset.metadata.format).toBe('parquet');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

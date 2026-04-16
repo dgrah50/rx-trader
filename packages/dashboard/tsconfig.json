@@ -18,6 +18,27 @@
       ],
       "@rx-trader/core/*": [
         "../../packages/core/src/*"
+      ],
+      "@rx-trader/backtest": [
+        "../../packages/backtest/src/index.ts"
+      ],
+      "@rx-trader/backtest/*": [
+        "../../packages/backtest/src/*"
+      ],
+      "@rx-trader/pipeline": [
+        "../../packages/pipeline/src/index.ts"
+      ],
+      "@rx-trader/pipeline/*": [
+        "../../packages/pipeline/src/*"
+      ],
+      "@rx-trader/observability": [
+        "../../packages/observability/src/index.ts"
+      ],
+      "@rx-trader/observability/*": [
+        "../../packages/observability/src/*"
+      ],
+      "@rx-trader/event-store": [
+        "../../packages/event-store/src/index.ts"
       ]
     }
   },

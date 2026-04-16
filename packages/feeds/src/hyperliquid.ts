@@ -1,4 +1,4 @@
-import type { MarketTick } from '@rx-trader/core';
+import { type MarketTick, parseFiniteNumber } from '@rx-trader/core';
 import { WebSocketFeed, type WebSocketFeedOptions } from './websocketFeed';
 
 type HyperliquidSubscriptionType = 'bbo' | 'l2Book' | 'trades';
@@ -113,8 +113,8 @@ export class HyperliquidFeedAdapter extends WebSocketFeed {
 
   private toLevel(level: HyperliquidLevel | null) {
     if (!level) return null;
-    const px = this.toNumber(level.px);
-    const sz = this.toNumber(level.sz);
+    const px = parseFiniteNumber(level.px);
+    const sz = parseFiniteNumber(level.sz);
     if (px === undefined && sz === undefined) return null;
     return { px, sz };
   }
@@ -122,20 +122,12 @@ export class HyperliquidFeedAdapter extends WebSocketFeed {
   private mapTrades(data: HyperliquidTrade[] | HyperliquidTrade): MarketTick | null {
     const trade = Array.isArray(data) ? data[data.length - 1] : data;
     if (!trade) return null;
-    const px = this.toNumber(trade.px);
+    const px = parseFiniteNumber(trade.px);
     if (px === undefined) return null;
     return {
       t: typeof trade.time === 'number' ? trade.time : Date.now(),
       symbol: (trade.coin ?? this.coin).toUpperCase(),
       last: px
     };
-  }
-
-  private toNumber(value?: string | number): number | undefined {
-    if (value === undefined) {
-      return undefined;
-    }
-    const num = typeof value === 'number' ? value : Number(value);
-    return Number.isFinite(num) ? num : undefined;
   }
 }

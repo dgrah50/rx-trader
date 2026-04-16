@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import crypto from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { MarketTick, DomainEvent } from '@rx-trader/core/domain';
+import type { PortfolioAnalytics } from '@rx-trader/core/domain';
 import { StrategyType, FeedType } from '@rx-trader/core/constants';
 import { startEngine, type EngineDependencies } from '@rx-trader/control-plane';
 import type { EnvOverrides, ExitConfig } from '@rx-trader/config';
@@ -12,11 +13,13 @@ import {
   InMemoryEventStore,
   buildProjection,
   positionsProjection,
-  pnlProjection
+  pnlProjection,
 } from '@rx-trader/event-store';
 import { BacktestScheduler } from './scheduler';
 import { HistoricalFeedAdapter } from './historicalFeedAdapter';
 import { createBacktestExecutionManager } from './execution';
+export * from './types';
+export type { TickDatasetMetadata } from './loaders';
 
 type PositionsState = ReturnType<typeof positionsProjection.init>;
 type PnlState = ReturnType<typeof pnlProjection.init>;
@@ -104,7 +107,7 @@ interface NavStats {
 const buildEnvOverrides = (
   symbol: string,
   options: EngineBacktestOptions,
-  sqlitePath: string
+  sqlitePath: string,
 ): EnvOverrides => {
   const strategyType = options.strategy?.type ?? StrategyType.Momentum;
   const primaryFeed = options.strategy?.primaryFeed ?? FeedType.Binance;
@@ -118,8 +121,8 @@ const buildEnvOverrides = (
       primaryFeed,
       extraFeeds: options.strategy?.extraFeeds ?? [],
       params: strategyParams,
-      exit: strategyExit
-    }
+      exit: strategyExit,
+    },
   ];
   const maxPosition = options.risk?.maxPosition ?? 10;
   const notional = options.risk?.notional ?? 1_000_000;
@@ -149,7 +152,7 @@ const buildEnvOverrides = (
     INTENT_COOLDOWN_MS: '0',
     INTENT_DEDUPE_WINDOW_MS: '0',
     INTENT_TIF: 'DAY',
-    SQLITE_PATH: sqlitePath
+    SQLITE_PATH: sqlitePath,
   };
 };
 
@@ -158,7 +161,7 @@ const createInlinePersistenceManager = (store: InMemoryEventStore) => {
     enqueue: (event: DomainEvent) => {
       void store.append(event);
     },
-    shutdown: () => {}
+    shutdown: () => {},
   };
 };
 
@@ -168,15 +171,17 @@ const createFeedManagerStub = (adapter: HistoricalFeedAdapter) => ({
     {
       id: adapter.id,
       stream: adapter.feed$,
-      adapter
-    }
+      adapter,
+    },
   ],
   stop: () => {
     adapter.disconnect?.();
-  }
+  },
 });
 
-export const runBacktest = async (options: EngineBacktestOptions): Promise<EngineBacktestResult> => {
+export const runBacktest = async (
+  options: EngineBacktestOptions,
+): Promise<EngineBacktestResult> => {
   if (!options.ticks.length) {
     throw new Error('Backtest requires at least one tick');
   }
@@ -191,17 +196,17 @@ export const runBacktest = async (options: EngineBacktestOptions): Promise<Engin
   const persistence = createInlinePersistenceManager(eventStore);
   let latestTick: MarketTick | undefined;
 
-const dependencies: EngineDependencies = {
-  createFeedManager: () => feedManager,
-  createExecutionManager: ({ enqueue }) =>
-    createBacktestExecutionManager({
-      clock: scheduler,
-      enqueue,
-      getLatestTick: () => latestTick
-    }),
-  createEventStore: async () => eventStore,
+  const dependencies: EngineDependencies = {
+    createFeedManager: () => feedManager,
+    createExecutionManager: ({ enqueue }) =>
+      createBacktestExecutionManager({
+        clock: scheduler,
+        enqueue,
+        getLatestTick: () => latestTick,
+      }),
+    createEventStore: async () => eventStore,
     createPersistenceManager: () => persistence,
-    startApiServer: async () => async () => {}
+    startApiServer: async () => async () => {},
   };
 
   const sqlitePath = join(tmpdir(), `rx-backtest-${crypto.randomUUID()}.sqlite`);
@@ -213,7 +218,7 @@ const dependencies: EngineDependencies = {
     registerSignalHandlers: false,
     clock: scheduler,
     configOverrides,
-    dependencies
+    dependencies,
   });
   const afterStartup = performance.now();
 
@@ -232,18 +237,17 @@ const dependencies: EngineDependencies = {
   handle.stop();
   const afterStop = performance.now();
 
-  try {
-    rmSync(sqlitePath, { force: true });
-  } catch {
-    // best effort cleanup
-  }
+  rmSync(sqlitePath, { force: true });
 
   const events = await eventStore.read();
   const positions = await buildProjection(eventStore, positionsProjection);
   const pnl = await buildProjection(eventStore, pnlProjection);
   const navCurve = events
     .filter((evt) => evt.type === 'pnl.analytics')
-    .map((evt) => ({ t: (evt.data as any).t as number, nav: (evt.data as any).nav as number }));
+    .map((evt) => {
+      const data = evt.data as PortfolioAnalytics;
+      return { t: data.t, nav: data.nav };
+    });
 
   const stats = computeBacktestStats({
     ticks: sortedTicks,
@@ -255,8 +259,8 @@ const dependencies: EngineDependencies = {
       startupMs: afterStartup - startInit,
       replayMs: afterReplay - afterStartup,
       settleMs: afterSettle - afterReplay,
-      teardownMs: afterStop - afterSettle
-    }
+      teardownMs: afterStop - afterSettle,
+    },
   });
 
   const clock: BacktestClockMetadata = {
@@ -264,7 +268,7 @@ const dependencies: EngineDependencies = {
     startMs: sortedTicks[0]!.t,
     endMs: sortedTicks[sortedTicks.length - 1]!.t,
     spanMs: sortedTicks.length > 1 ? sortedTicks[sortedTicks.length - 1]!.t - sortedTicks[0]!.t : 0,
-    ticks: sortedTicks.length
+    ticks: sortedTicks.length,
   };
 
   return { events, positions, pnl, navCurve, stats, clock };
@@ -286,11 +290,18 @@ interface ComputeStatsOptions {
   };
 }
 
-const computeBacktestStats = ({ ticks, events, navCurve, pnl, timings }: ComputeStatsOptions): BacktestStats => {
+const computeBacktestStats = ({
+  ticks,
+  events,
+  navCurve,
+  pnl,
+  timings,
+}: ComputeStatsOptions): BacktestStats => {
   const tickSpanMs = ticks.length > 1 ? ticks[ticks.length - 1]!.t - ticks[0]!.t : 0;
   const wallRuntimeMs = Math.max(timings.wallRuntimeMs, 0);
   const ticksPerSecond = wallRuntimeMs > 0 ? ticks.length / (wallRuntimeMs / 1000) : ticks.length;
-  const eventsPerSecond = wallRuntimeMs > 0 ? events.length / (wallRuntimeMs / 1000) : events.length;
+  const eventsPerSecond =
+    wallRuntimeMs > 0 ? events.length / (wallRuntimeMs / 1000) : events.length;
   const nav = computeNavStats(navCurve, pnl.latest?.nav ?? 0);
   const eventCounts = countEvents(events);
 
@@ -305,11 +316,14 @@ const computeBacktestStats = ({ ticks, events, navCurve, pnl, timings }: Compute
     ticksPerSecond,
     eventsPerSecond,
     eventCounts,
-    nav
+    nav,
   };
 };
 
-const computeNavStats = (navCurve: Array<{ t: number; nav: number }>, latestNav: number): NavStats => {
+const computeNavStats = (
+  navCurve: Array<{ t: number; nav: number }>,
+  latestNav: number,
+): NavStats => {
   if (!navCurve.length) {
     return {
       startNav: latestNav,
@@ -320,7 +334,7 @@ const computeNavStats = (navCurve: Array<{ t: number; nav: number }>, latestNav:
       maxDrawdownPct: 0,
       sharpe: 0,
       volatility: 0,
-      samples: 0
+      samples: 0,
     };
   }
   const sorted = [...navCurve].sort((a, b) => a.t - b.t);
@@ -349,9 +363,8 @@ const computeNavStats = (navCurve: Array<{ t: number; nav: number }>, latestNav:
   }
   const samples = returns.length;
   const mean = samples ? returns.reduce((acc, value) => acc + value, 0) / samples : 0;
-  const variance = samples > 1
-    ? returns.reduce((acc, value) => acc + (value - mean) ** 2, 0) / (samples - 1)
-    : 0;
+  const variance =
+    samples > 1 ? returns.reduce((acc, value) => acc + (value - mean) ** 2, 0) / (samples - 1) : 0;
   const volatility = Math.sqrt(variance);
   const sharpe = volatility > 0 ? (mean / volatility) * Math.sqrt(samples) : 0;
 
@@ -364,7 +377,7 @@ const computeNavStats = (navCurve: Array<{ t: number; nav: number }>, latestNav:
     maxDrawdownPct,
     sharpe,
     volatility,
-    samples
+    samples,
   };
 };
 
@@ -401,7 +414,7 @@ const countEvents = (events: DomainEvent[]): EventCountStats => {
       orderReject: 0,
       orderFill: 0,
       pnlAnalytics: 0,
-      portfolioSnapshots: 0
-    }
+      portfolioSnapshots: 0,
+    },
   );
 };

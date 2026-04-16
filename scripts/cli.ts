@@ -15,7 +15,7 @@ import {
   accountTransferSchema,
 } from '@rx-trader/core/domain';
 import { startEngine } from '@rx-trader/control-plane';
-import { runBacktest, loadTicks } from '@rx-trader/backtest';
+import { runBacktest, loadTicks, type BacktestArtifact } from '@rx-trader/backtest';
 import {
   DEFAULT_STRATEGIES,
   loadConfig,
@@ -248,7 +248,10 @@ export const buildProgram = (): Command => {
           },
         }),
       )
-      .catch(() => {});
+      .catch((error) => {
+        if (error instanceof Error && error.name === 'AbortError') return;
+        console.error(`[${label}] failed to forward output`, error);
+      });
   };
 
   const startDashboardDevServer = (options: { gatewayUrl: string; port: number }) => {
@@ -280,11 +283,7 @@ export const buildProgram = (): Command => {
       cmd = ['xdg-open', url];
     }
     if (cmd) {
-      try {
-        Bun.spawn({ cmd, stdout: 'ignore', stderr: 'ignore' });
-      } catch {
-        // best effort
-      }
+      Bun.spawn({ cmd, stdout: 'ignore', stderr: 'ignore' });
     }
   };
 
@@ -326,23 +325,14 @@ export const buildProgram = (): Command => {
 
     const waitForDashboard = async () => {
       if (!dashboardProc) return;
-      try {
-        const { exited } = dashboardProc;
-        await exited;
-      } catch {
-        // ignore
-      }
+      await dashboardProc.exited;
     };
 
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
       if (dashboardProc) {
-        try {
-          dashboardProc.kill();
-        } catch {
-          // ignore
-        }
+        dashboardProc.kill();
       }
       handle.stop();
       await waitForDashboard();
@@ -400,15 +390,19 @@ export const buildProgram = (): Command => {
     signalAwaiter.cleanup();
 
     if (process.env.RX_DEBUG_SHUTDOWN === '1') {
-      try {
-        const handles = (process as any)._getActiveHandles?.() ?? [];
+      const getActiveHandles = (
+        process as typeof process & {
+          _getActiveHandles?: () => unknown[];
+        }
+      )._getActiveHandles;
+      if (getActiveHandles) {
+        const handles = getActiveHandles();
         console.log('[env:demo] active handles after shutdown:', handles.length);
-        handles.forEach((handle: any, idx: number) => {
-          const type = handle?.constructor?.name ?? typeof handle;
+        handles.forEach((handle, idx) => {
+          const type =
+            (handle as { constructor?: { name?: string } })?.constructor?.name ?? typeof handle;
           console.log(`  [${idx}] ${type}`);
         });
-      } catch (error) {
-        console.warn('Failed to introspect active handles', error);
       }
     }
   };
@@ -607,6 +601,7 @@ export const buildProgram = (): Command => {
         ticksUsed: dataset.ticks.length,
         events: result.events.length,
         nav: result.pnl.latest?.nav ?? 0,
+        pnl: result.pnl.latest?.pnl ?? 0,
         realized: result.pnl.latest?.realized ?? 0,
         unrealized: result.pnl.latest?.unrealized ?? 0,
         maxDrawdown: stats.nav.maxDrawdown,
@@ -616,7 +611,7 @@ export const buildProgram = (): Command => {
         ticksPerSecond: stats.ticksPerSecond,
       };
 
-      const artifact = {
+      const artifact: BacktestArtifact = {
         summary,
         clock: {
           engine: result.clock,
