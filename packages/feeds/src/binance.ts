@@ -10,7 +10,7 @@ export interface BinanceFeedConfig extends WebSocketFeedOptions {
 }
 
 type BinanceBookTickerEvent = {
-  s: string;
+  s?: string;
   b: string;
   B: string;
   a: string;
@@ -19,10 +19,18 @@ type BinanceBookTickerEvent = {
   E?: number;
 };
 
-type BinanceCombinedStream = {
-  stream: string;
-  data: BinanceBookTickerEvent;
-};
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isBinanceBookTickerEvent = (value: unknown): value is BinanceBookTickerEvent =>
+  isRecord(value) &&
+  typeof value.b === 'string' &&
+  typeof value.B === 'string' &&
+  typeof value.a === 'string' &&
+  typeof value.A === 'string' &&
+  (value.s === undefined || typeof value.s === 'string') &&
+  (value.c === undefined || typeof value.c === 'string') &&
+  (value.E === undefined || typeof value.E === 'number');
 
 export class BinanceFeedAdapter extends WebSocketFeed {
   private readonly symbol: string;
@@ -50,32 +58,26 @@ export class BinanceFeedAdapter extends WebSocketFeed {
       return null;
     }
 
-    if (!('b' in payload) || !('a' in payload)) {
-      return null;
-    }
-
-    const event = payload as BinanceBookTickerEvent;
-    const symbol = (event.s ?? this.symbol).toUpperCase();
+    const symbol = (payload.s ?? this.symbol).toUpperCase();
 
     return {
-      t: typeof event.E === 'number' ? event.E : Date.now(),
+      t: payload.E ?? Date.now(),
       symbol,
-      bid: parseFiniteNumber(event.b),
-      ask: parseFiniteNumber(event.a),
-      last: parseFiniteNumber(event.c ?? event.a ?? event.b),
-      bidSz: parseFiniteNumber(event.B),
-      askSz: parseFiniteNumber(event.A)
+      bid: parseFiniteNumber(payload.b),
+      ask: parseFiniteNumber(payload.a),
+      last: parseFiniteNumber(payload.c ?? payload.a),
+      bidSz: parseFiniteNumber(payload.B),
+      askSz: parseFiniteNumber(payload.A)
     };
   }
 
   private unwrap(message: unknown): BinanceBookTickerEvent | null {
-    if (!message || typeof message !== 'object') {
+    if (!isRecord(message)) {
       return null;
     }
     if ('data' in message) {
-      const combined = message as BinanceCombinedStream;
-      return combined.data ?? null;
+      return isBinanceBookTickerEvent(message.data) ? message.data : null;
     }
-    return message as BinanceBookTickerEvent;
+    return isBinanceBookTickerEvent(message) ? message : null;
   }
 }

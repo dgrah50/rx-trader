@@ -20,7 +20,7 @@ interface PersistenceManagerOptions {
 
 interface PersistenceManager {
   enqueue: (event: DomainEvent) => void;
-  shutdown: () => void;
+  shutdown: () => Promise<void> | void;
 }
 
 export const createPersistenceManager = (options: PersistenceManagerOptions): PersistenceManager => {
@@ -46,6 +46,17 @@ export const createPersistenceManager = (options: PersistenceManagerOptions): Pe
   });
 
   let forceTerminateTimer: ReturnType<typeof setTimeout> | null = null;
+  let shutdownPromise: Promise<void> | null = null;
+  let resolveShutdown: (() => void) | null = null;
+  let rejectShutdown: ((error: Error) => void) | null = null;
+
+  worker.on('message', (message: { type?: string; event?: DomainEvent }) => {
+    if (message.type === 'committed' && message.event) {
+      options.store.stream$.next(message.event);
+    } else if (message.type === 'shutdown-ack') {
+      resolveShutdown?.();
+    }
+  });
 
   worker.on('exit', (code) => {
     if (forceTerminateTimer) {
@@ -54,8 +65,10 @@ export const createPersistenceManager = (options: PersistenceManagerOptions): Pe
     }
     if (code !== 0) {
       options.logger?.error?.({ code }, 'Persistence worker exited unexpectedly');
+      rejectShutdown?.(new Error(`Persistence worker exited with code ${code}`));
     } else {
       options.logger?.info?.({ code }, 'Persistence worker exited');
+      resolveShutdown?.();
     }
   });
 
@@ -100,27 +113,41 @@ export const createPersistenceManager = (options: PersistenceManagerOptions): Pe
         }
       );
     } else {
-      options.store.stream$.next(event);
+      // The worker publishes the event only after the database commits it.
     }
     metrics && sampleDepth();
   };
 
-  const shutdown = () => {
+  const shutdown = (): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = new Promise<void>((resolve, reject) => {
+      resolveShutdown = resolve;
+      rejectShutdown = reject;
+    });
     if (sampleInterval) {
       clearInterval(sampleInterval);
     }
+    queue.shutdown();
     try {
       worker.postMessage({ type: 'shutdown' });
     } catch (error) {
-      options.logger?.error?.({ error }, 'Failed to signal persistence worker shutdown');
+      const shutdownError = error instanceof Error ? error : new Error(String(error));
+      options.logger?.error?.({ error: shutdownError }, 'Failed to signal persistence worker shutdown');
+      rejectShutdown?.(shutdownError);
+      return shutdownPromise;
     }
     const timeoutMs = options.workerShutdownTimeoutMs ?? 2_000;
     forceTerminateTimer = setTimeout(() => {
       forceTerminateTimer = null;
       worker
         .terminate()
-        .catch((error) => options.logger?.error?.({ error }, 'Failed to terminate persistence worker'));
+        .then(() => rejectShutdown?.(new Error('Persistence worker did not flush before shutdown')))
+        .catch((error) => {
+          options.logger?.error?.({ error }, 'Failed to terminate persistence worker');
+          rejectShutdown?.(error instanceof Error ? error : new Error(String(error)));
+        });
     }, timeoutMs);
+    return shutdownPromise;
   };
 
   return { enqueue, shutdown };

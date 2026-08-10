@@ -1,11 +1,7 @@
 import type { Subscription } from 'rxjs';
 import type { OrderNew, Fill, OrderReject } from '@rx-trader/core/domain';
 import { systemClock, type Clock } from '@rx-trader/core/time';
-import type {
-  StrategyBudgetConfig,
-  StrategyDefinition,
-  StrategyMode
-} from '@rx-trader/config';
+import type { StrategyBudgetConfig, StrategyDefinition, StrategyMode } from '@rx-trader/config';
 import type { StrategyMarginConfig } from './types';
 import type { EventBus } from '@rx-trader/core';
 
@@ -52,11 +48,13 @@ export interface StrategyTelemetrySnapshot {
 export interface StrategyTelemetry {
   snapshot: () => StrategyTelemetrySnapshot[];
   stop: () => void;
-  recordOrder: (order: OrderNew) => void;
-  recordFill: (fill: Fill) => void;
-  recordRiskReject: (order: OrderNew, reasons?: string[]) => void;
-  recordExecutionReject: (reject: OrderReject) => void;
   recordExit: (strategyId: string, reason?: string) => void;
+}
+
+export interface StrategyTelemetryConfig {
+  definition: StrategyDefinition;
+  fees?: StrategyTelemetrySnapshot['fees'];
+  margin?: StrategyMarginConfig;
 }
 
 type TelemetryEntry = StrategyTelemetrySnapshot;
@@ -71,14 +69,14 @@ const createInitialMetrics = (): StrategyMetrics => ({
   lastIntentTs: null,
   lastOrderTs: null,
   lastFillTs: null,
-  lastRejectTs: null
+  lastRejectTs: null,
 });
 
 const createExitMetrics = (): ExitMetrics => ({
   total: 0,
   byReason: {},
   lastReason: null,
-  lastTs: null
+  lastTs: null,
 });
 
 const snapshotEntry = (entry: TelemetryEntry): StrategyTelemetrySnapshot => ({
@@ -98,44 +96,27 @@ const snapshotEntry = (entry: TelemetryEntry): StrategyTelemetrySnapshot => ({
     total: entry.exits.total,
     byReason: { ...entry.exits.byReason },
     lastReason: entry.exits.lastReason,
-    lastTs: entry.exits.lastTs
-  }
+    lastTs: entry.exits.lastTs,
+  },
 });
 
-const selectStrategyId = (
-  order: Pick<OrderNew, 'meta' | 'symbol'>,
-  strategiesBySymbol: Map<string, string[]>
-) => {
+const selectStrategyId = (order: Pick<OrderNew, 'meta'>) => {
   const metaId = order.meta?.strategyId;
-  if (typeof metaId === 'string' && metaId.length) {
-    return metaId;
-  }
-  const ids = strategiesBySymbol.get(order.symbol.toUpperCase());
-  return ids?.[0] ?? null;
+  return typeof metaId === 'string' && metaId.length ? metaId : null;
 };
 
 export const createStrategyTelemetry = (params: {
-  strategies: StrategyDefinition[];
+  strategies: StrategyTelemetryConfig[];
   eventBus: EventBus;
   clock?: Clock;
 }): StrategyTelemetry => {
   const clock = params.clock ?? systemClock;
   const entries = new Map<string, TelemetryEntry>();
   const orderToStrategy = new Map<string, string>();
-  const strategiesBySymbol = new Map<string, string[]>();
   const subs: Subscription[] = [];
 
-  const trackSymbol = (definition: StrategyDefinition) => {
-    const symbol = definition.tradeSymbol.toUpperCase();
-    const current = strategiesBySymbol.get(symbol) ?? [];
-    if (!current.includes(definition.id)) {
-      current.push(definition.id);
-      strategiesBySymbol.set(symbol, current);
-    }
-  };
-
-  params.strategies.forEach((definition) => {
-    trackSymbol(definition);
+  params.strategies.forEach((strategy) => {
+    const { definition } = strategy;
     const entry: TelemetryEntry = {
       id: definition.id,
       type: definition.type,
@@ -146,10 +127,10 @@ export const createStrategyTelemetry = (params: {
       priority: definition.priority ?? 0,
       budget: definition.budget,
       params: definition.params ?? {},
-      fees: undefined,
-      margin: undefined,
+      fees: strategy.fees,
+      margin: strategy.margin,
       metrics: createInitialMetrics(),
-      exits: createExitMetrics()
+      exits: createExitMetrics(),
     };
     entries.set(entry.id, entry);
   });
@@ -195,7 +176,7 @@ export const createStrategyTelemetry = (params: {
   const recordRejectMetrics = (strategyId: string, rejectId: string, ts: number) => {
     const entry = entries.get(strategyId);
     if (!entry) return;
-    orderToStrategy.set(rejectId, strategyId);
+    orderToStrategy.delete(rejectId);
     entry.metrics.rejects += 1;
     entry.metrics.lastRejectTs = ts;
   };
@@ -232,14 +213,14 @@ export const createStrategyTelemetry = (params: {
     params.eventBus.on('strategy.signal').subscribe((event) => {
       const data = event.data as StrategySignalEventData;
       recordSignal(data.strategyId, event.ts);
-    })
+    }),
   );
 
   subs.push(
     params.eventBus.on('strategy.intent').subscribe((event) => {
       const data = event.data as StrategyIntentEventData;
       recordIntent(data.strategyId, event.ts);
-    })
+    }),
   );
 
   subs.push(
@@ -248,57 +229,33 @@ export const createStrategyTelemetry = (params: {
       const strategyId = data.metadata?.strategyId;
       if (!strategyId || data.passed) return;
       recordRiskCheck(strategyId, event.ts);
-    })
+    }),
   );
 
   subs.push(
     params.eventBus.on('order.new').subscribe((event) => {
       const order = event.data as OrderNew;
-      const strategyId = selectStrategyId(order, strategiesBySymbol);
+      const strategyId = selectStrategyId(order);
       if (!strategyId) return;
       recordOrderMetrics(strategyId, order.id, event.ts);
-    })
+    }),
   );
 
   subs.push(
     params.eventBus.on('order.fill').subscribe((event) => {
       const fill = event.data as Fill;
       recordFillMetrics(fill.orderId, event.ts);
-    })
+    }),
   );
 
   subs.push(
     params.eventBus.on('order.reject').subscribe((event) => {
       const reject = event.data as OrderReject;
       const strategyId = orderToStrategy.get(reject.id);
-      const resolvedStrategyId =
-        strategyId ?? (typeof event.metadata?.strategyId === 'string' ? event.metadata.strategyId : null);
-      if (!resolvedStrategyId) return;
-      recordRejectMetrics(resolvedStrategyId, reject.id, event.ts);
-    })
+      if (!strategyId) return;
+      recordRejectMetrics(strategyId, reject.id, event.ts);
+    }),
   );
-
-  const recordOrder = (order: OrderNew) => {
-    const strategyId = selectStrategyId(order, strategiesBySymbol);
-    if (!strategyId) return;
-    recordOrderMetrics(strategyId, order.id, clock.now());
-  };
-
-  const recordFill = (fill: Fill) => {
-    recordFillMetrics(fill.orderId, clock.now());
-  };
-
-  const recordRiskReject = (order: OrderNew, _reasons?: string[]) => {
-    const strategyId = selectStrategyId(order, strategiesBySymbol);
-    if (!strategyId) return;
-    recordRejectMetrics(strategyId, order.id, clock.now());
-  };
-
-  const recordExecutionReject = (reject: OrderReject) => {
-    const strategyId = orderToStrategy.get(reject.id);
-    if (!strategyId) return;
-    recordRejectMetrics(strategyId, reject.id, clock.now());
-  };
 
   const recordExit = (strategyId: string, reason?: string) => {
     recordExitMetrics(strategyId, reason, clock.now());
@@ -313,12 +270,8 @@ export const createStrategyTelemetry = (params: {
   };
 
   return {
-    recordOrder,
-    recordFill,
-    recordRiskReject,
-    recordExecutionReject,
     recordExit,
     snapshot,
-    stop
+    stop,
   };
 };

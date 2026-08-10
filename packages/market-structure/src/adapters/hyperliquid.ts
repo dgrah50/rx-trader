@@ -16,6 +16,39 @@ interface HyperliquidMarket {
   enabled?: boolean;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isOptionalNumber = (value: unknown): value is number | undefined =>
+  value === undefined || typeof value === 'number';
+
+const isHyperliquidMarket = (value: unknown): value is HyperliquidMarket =>
+  isRecord(value) &&
+  typeof value.coin === 'string' &&
+  isOptionalNumber(value.szDecimals) &&
+  isOptionalNumber(value.pxDecimals) &&
+  isOptionalNumber(value.minSize) &&
+  (value.enabled === undefined || typeof value.enabled === 'boolean');
+
+const parseMarketList = (value: unknown): HyperliquidMarket[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isHyperliquidMarket)) {
+    throw new Error('Hyperliquid meta response has an invalid market list');
+  }
+  return value;
+};
+
+const parseHyperliquidMetaResponse = (value: unknown): HyperliquidMetaResponse => {
+  if (!isRecord(value)) {
+    throw new Error('Hyperliquid meta response has an invalid shape');
+  }
+  return {
+    universe: parseMarketList(value.universe),
+    perpetuals: parseMarketList(value.perpetuals),
+    markets: parseMarketList(value.markets)
+  };
+};
+
 const calcStep = (decimals?: number) => {
   if (decimals === undefined) return 0;
   return Number((1 / Math.pow(10, decimals)).toFixed(decimals));
@@ -32,7 +65,7 @@ export const fetchHyperliquidMarketStructure = async (apiUrl: string = defaultUr
     throw new Error(`Failed to fetch Hyperliquid meta: ${response.status}`);
   }
 
-  const payload = (await response.json()) as HyperliquidMetaResponse;
+  const payload = parseHyperliquidMetaResponse(await response.json());
   const markets = payload.perpetuals ?? payload.universe ?? payload.markets ?? [];
   if (!markets.length) {
     throw new Error('Hyperliquid meta response missing market data');

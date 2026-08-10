@@ -1,4 +1,4 @@
-import { filter, map, share } from 'rxjs';
+import { distinct, filter, map, share } from 'rxjs';
 import type { DomainEvent, Fill, MarketTick, OrderNew, OrderAck, OrderReject } from '@rx-trader/core/domain';
 import { ExecutionVenue } from '@rx-trader/core/constants';
 import { PaperExecutionAdapter } from '@rx-trader/execution';
@@ -30,7 +30,10 @@ interface BacktestExecutionManagerOptions {
 export const createBacktestExecutionManager = (options: BacktestExecutionManagerOptions) => {
   const adapter = new BacktestPaperAdapter(options.clock, options.getLatestTick);
 
-  const events$ = adapter.events$.pipe(share());
+  const events$ = adapter.events$.pipe(
+    distinct((event) => event.dedupeKey ?? event.id),
+    share(),
+  );
 
   events$.subscribe((event) => {
     options.enqueue(event as DomainEvent);

@@ -29,10 +29,21 @@ export const instrumentEventStore = (
     }
   };
 
+  const readCommitted: EventStore['readCommitted'] = async (afterCursor) => {
+    const stop = metrics.eventStoreReadDuration.labels({ driver, mode: 'cursor' }).startTimer();
+    try {
+      return await store.readCommitted(afterCursor);
+    } finally {
+      stop();
+    }
+  };
+
   return {
     append,
     read,
+    readCommitted,
     stream$: store.stream$,
+    close: store.close?.bind(store),
     createSnapshot: store.createSnapshot?.bind(store),
     restoreFromSnapshot: store.restoreFromSnapshot?.bind(store)
   };

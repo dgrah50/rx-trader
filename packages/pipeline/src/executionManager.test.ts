@@ -83,6 +83,25 @@ describe('createExecutionManager', () => {
     expect(fill.liquidity).toBe('MAKER');
   });
 
+  it('does not forward a retried order execution twice', async () => {
+    const enqueue = vi.fn();
+    const manager = createExecutionManager({
+      live: false,
+      config: loadConfig(),
+      enqueue,
+      clock: { now: () => 1 },
+      metrics: createTestMetrics(),
+      logger: createLogger('test', { enabled: false }),
+    });
+    const fills: unknown[] = [];
+    manager.fills$.subscribe((fill) => fills.push(fill));
+    const order = createOrder();
+    await manager.submit(order);
+    await manager.submit(order);
+    expect(fills).toHaveLength(1);
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
+
   it('uses Binance gateway when live=true and credentials are provided', () => {
     const enqueue = vi.fn();
     const config = loadConfig({

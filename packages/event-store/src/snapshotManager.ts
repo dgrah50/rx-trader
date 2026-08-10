@@ -10,6 +10,7 @@ type SnapshotPosition = PositionMark;
 
 export interface PositionsSnapshot {
   ts: number;
+  eventCursor?: number;
   positions: Record<string, SnapshotPosition>;
   balances?: Record<string, Record<string, BalanceEntry>>;
   clock?: SnapshotClockMetadata;
@@ -41,13 +42,15 @@ export const savePositionsSnapshot = async (
   clock: Clock = systemClock,
   clockMeta?: SnapshotClockMetaInput
 ) => {
-  const events = await store.read();
+  const committed = await store.readCommitted();
+  const events = committed.events;
   const initialPositions = positionsProjection.init();
   const positionsState = events.reduce((state, event) => positionsProjection.reduce(state, event), initialPositions);
   const balancesState = events.reduce(balancesProjection.reduce, balancesProjection.init());
   const captured = clock.now();
   const snapshot: PositionsSnapshot = {
     ts: captured,
+    eventCursor: committed.cursor,
     positions: positionsState.positions,
     balances: balancesState.balances,
     clock: {
@@ -71,7 +74,10 @@ export const replayPositionsFromSnapshot = async (
   store: EventStore,
   snapshot: PositionsSnapshot
 ) => {
-  const events = await store.read(snapshot.ts);
+  const events =
+    snapshot.eventCursor === undefined
+      ? await store.read(snapshot.ts)
+      : (await store.readCommitted(snapshot.eventCursor)).events;
   const positionsState = events.reduce(
     (state, event) => positionsProjection.reduce(state, event),
     { positions: { ...snapshot.positions } as Record<string, PositionMark> }

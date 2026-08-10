@@ -61,7 +61,7 @@ graph LR
 
 The system splits into two data planes:
 
-**Hot path (RxJS observables)** handles the trading-critical flow. Ticks stream through strategies, intent shaping, risk filters, and execution as direct observable chains. Sub-millisecond latency, compile-time type safety, backpressure control via operators like `throttle`, `buffer`, and `sample`.
+**Hot path (RxJS observables)** handles the trading-critical flow. Ticks stream through strategies, intent shaping, risk filters, and execution as direct observable chains.
 
 **Cold path (EventBus)** handles observability. Every significant state transition (signals, risk decisions, fills, portfolio snapshots) is emitted as a domain event for persistence, dashboard updates, and the audit trail. Heavy I/O stays off the hot path entirely.
 
@@ -137,8 +137,8 @@ Strategies, risk limits, exit rules, venue preferences, and margin settings are 
 ## Key Design Decisions
 
 - **Single process**: no microservice overhead. A persistence worker offloads DB writes without touching the event loop.
-- **Event sourcing**: every tick, signal, intent, fill, and snapshot is an immutable event. Projections and dashboards are pure replays.
-- **Config-first**: the same binary runs demos, backtests, and live trading. Behavior is driven entirely by configuration.
+- **Event sourcing**: durable order, risk, balance, transfer, portfolio, and PnL events drive projections and dashboard views.
+- **Config-first**: demos, backtests, and Binance live execution share the same runtime composition.
 - **Shared-memory persistence**: a `SharedArrayBuffer` ring buffer sits between the pipeline and the persistence worker. The hot path never blocks on DB writes.
 - **Multi-strategy**: strategies run as isolated observable graphs with per-strategy budgets, priorities, and sandbox/live modes.
 
@@ -157,4 +157,4 @@ rx bench               # pipeline latency benchmark
 
 ## Status
 
-This is an active experiment. The architecture is stable and the core pipeline works end-to-end (feeds -> strategies -> risk -> execution -> persistence -> dashboard). See the issues for current work.
+This is an active experiment. The paper and backtest pipeline works end-to-end (feeds -> strategies -> risk -> execution -> persistence -> dashboard). Live venue adapters require venue-specific validation before use.

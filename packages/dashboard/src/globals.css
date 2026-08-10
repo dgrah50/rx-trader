@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 @theme {
   --color-border: hsl(var(--border));
@@ -43,11 +43,10 @@
 
 @layer base {
   :root {
-    /* Default to Dark Mode variables directly since this is a dark-first app */
-    --background: 240 5% 4%;     /* Deepest Zinc */
+    --background: 240 5% 4%;
     --foreground: 0 0% 98%;
 
-    --card: 240 4% 7%;           /* Subtle separation from BG */
+    --card: 240 4% 7%;
     --card-foreground: 0 0% 98%;
 
     --popover: 240 4% 7%;
@@ -60,7 +59,7 @@
     --secondary-foreground: 0 0% 98%;
 
     --muted: 240 4% 12%;
-    --muted-foreground: 240 5% 60%; /* Softer, readable gray */
+    --muted-foreground: 240 5% 60%;
 
     --accent: 240 4% 14%;
     --accent-foreground: 0 0% 98%;
@@ -68,10 +67,10 @@
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 240 4% 16%;        /* Very subtle border */
+    --border: 240 4% 16%;
     --input: 240 4% 16%;
     --ring: 240 5% 84%;
-    
+
     --radius: 0.5rem;
   }
 
@@ -104,10 +103,9 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "cv11", "ss01";
+    font-feature-settings: 'cv11', 'ss01';
   }
-  
-  /* Refined Scrollbar */
+
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -123,17 +121,14 @@
   }
 }
 
-/* Utility classes for numbers */
 .font-mono-nums {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
 }
 
-/* Apple-style signal colors */
 .text-up {
   color: var(--color-up);
 }
 .text-down {
   color: var(--color-down);
 }
-

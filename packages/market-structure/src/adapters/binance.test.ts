@@ -37,4 +37,14 @@ describe('fetchBinanceMarketStructure', () => {
     expect(snapshot.exchangePairs).toHaveLength(1);
     expect(snapshot.exchangePairs[0]?.lotSize).toBeCloseTo(0.001);
   });
+
+  it('rejects malformed exchange info instead of trusting response.json()', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ symbols: [{ symbol: 'BTCUSDT' }] }), { status: 200 })
+    );
+
+    await expect(fetchBinanceMarketStructure('https://example.com')).rejects.toThrow(
+      'invalid shape'
+    );
+  });
 });

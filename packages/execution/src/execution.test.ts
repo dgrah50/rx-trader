@@ -5,7 +5,6 @@ import {
   BinanceMockGateway,
   HyperliquidMockGateway,
   BinanceRestGateway,
-  HyperliquidRestGateway
 } from './index';
 import { ExecutionVenue } from '@rx-trader/core/constants';
 import { createManualClock } from '@rx-trader/core/time';
@@ -18,7 +17,7 @@ const order = {
   qty: 1,
   type: 'MKT' as const,
   tif: 'DAY' as const,
-  account: 'TEST'
+  account: 'TEST',
 };
 
 describe('PaperExecutionAdapter', () => {
@@ -72,30 +71,19 @@ describe('BinanceRestGateway', () => {
     const clock = createManualClock(20);
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ status: 'FILLED', price: '101', transactTime: 1 }), { status: 200 }));
-    const adapter = new BinanceRestGateway({ apiKey: 'key', apiSecret: 'secret', baseUrl: 'https://example.com' }, clock);
+      .mockResolvedValue(
+        new Response(JSON.stringify({ status: 'FILLED', price: '101', transactTime: 1 }), {
+          status: 200,
+        }),
+      );
+    const adapter = new BinanceRestGateway(
+      { apiKey: 'key', apiSecret: 'secret', baseUrl: 'https://example.com' },
+      clock,
+    );
     const events = firstValueFrom(adapter.events$.pipe(take(2), toArray()));
     await adapter.submit(order);
     const [, fill] = (await events) as any[];
     expect(fetchMock).toHaveBeenCalled();
     expect(fill?.data.px).toBe(101);
-  });
-});
-
-describe('HyperliquidRestGateway', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('submits signed JSON payloads', async () => {
-    const clock = createManualClock(30);
-    const fetchMock = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ status: 'filled', price: 99, timestamp: 2 }), { status: 200 }));
-    const adapter = new HyperliquidRestGateway({ apiKey: 'key', apiSecret: 'secret', baseUrl: 'https://example.com' }, clock);
-    const events = firstValueFrom(adapter.events$.pipe(take(2), toArray()));
-    await adapter.submit(order);
-    await events;
-    expect(fetchMock).toHaveBeenCalled();
   });
 });

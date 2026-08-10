@@ -9,11 +9,6 @@ export interface HyperliquidFeedConfig extends WebSocketFeedOptions {
   baseUrl?: string;
 }
 
-interface HyperliquidSubscriptionResponse {
-  channel: string;
-  data: unknown;
-}
-
 interface HyperliquidBboData {
   coin: string;
   time: number;
@@ -33,6 +28,29 @@ interface HyperliquidTrade {
   side?: string;
   time: number;
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isHyperliquidLevel = (value: unknown): value is HyperliquidLevel =>
+  isRecord(value) &&
+  (typeof value.px === 'string' || typeof value.px === 'number') &&
+  (typeof value.sz === 'string' || typeof value.sz === 'number');
+
+const isHyperliquidBboData = (value: unknown): value is HyperliquidBboData =>
+  isRecord(value) &&
+  typeof value.coin === 'string' &&
+  typeof value.time === 'number' &&
+  Array.isArray(value.bbo) &&
+  value.bbo.length === 2 &&
+  value.bbo.every((level) => level === null || isHyperliquidLevel(level));
+
+const isHyperliquidTrade = (value: unknown): value is HyperliquidTrade =>
+  isRecord(value) &&
+  typeof value.coin === 'string' &&
+  typeof value.time === 'number' &&
+  (typeof value.px === 'string' || typeof value.px === 'number') &&
+  (typeof value.sz === 'string' || typeof value.sz === 'number');
 
 export class HyperliquidFeedAdapter extends WebSocketFeed {
   private readonly coin: string;
@@ -62,25 +80,25 @@ export class HyperliquidFeedAdapter extends WebSocketFeed {
   }
 
   protected mapMessage(message: unknown): MarketTick | null {
-    if (!message || typeof message !== 'object' || message === null) {
+    if (!isRecord(message) || typeof message.channel !== 'string') {
       return null;
     }
-    if (!('channel' in message)) {
+    if (message.channel === 'subscriptionResponse') {
       return null;
     }
-    return this.handleStructuredMessage(message as HyperliquidSubscriptionResponse);
-  }
-
-  private handleStructuredMessage(payload: HyperliquidSubscriptionResponse): MarketTick | null {
-    if (payload.channel === 'subscriptionResponse') {
-      return null;
-    }
-    if (payload.channel === this.subscriptionType && payload.data) {
+    if (message.channel === this.subscriptionType) {
       if (this.subscriptionType === 'bbo') {
-        return this.mapBbo(payload.data as HyperliquidBboData);
+        return isHyperliquidBboData(message.data) ? this.mapBbo(message.data) : null;
       }
       if (this.subscriptionType === 'trades') {
-        return this.mapTrades(payload.data as HyperliquidTrade[] | HyperliquidTrade);
+        const trades = Array.isArray(message.data)
+          ? message.data.every(isHyperliquidTrade)
+            ? message.data
+            : null
+          : isHyperliquidTrade(message.data)
+            ? message.data
+            : null;
+        return trades ? this.mapTrades(trades) : null;
       }
     }
     return null;

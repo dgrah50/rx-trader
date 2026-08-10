@@ -37,6 +37,7 @@ export interface EngineDependencies extends RuntimeDependencies {
 export interface StartEngineOptions {
   live?: boolean;
   registerSignalHandlers?: boolean;
+  persistPortfolioUpdatesImmediately?: boolean;
   configOverrides?: EnvOverrides;
   clock?: Clock;
   dependencies?: EngineDependencies;

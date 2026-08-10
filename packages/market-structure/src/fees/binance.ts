@@ -15,7 +15,14 @@ interface BinanceTradeFeeResponse {
   takerCommission: string;
 }
 
-const BINANCE_DEFAULT_FEES = { makerBps: 1, takerBps: 1 };
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isBinanceTradeFee = (value: unknown): value is BinanceTradeFeeResponse =>
+  isRecord(value) &&
+  typeof value.symbol === 'string' &&
+  typeof value.makerCommission === 'string' &&
+  typeof value.takerCommission === 'string';
 
 export const fetchBinanceFees = async (
   options: BinanceFeeFetcherOptions,
@@ -23,7 +30,7 @@ export const fetchBinanceFees = async (
   const productType = options.productType ?? 'SPOT';
   const ts = options.timestamp ?? Date.now();
   if (!options.apiKey || !options.apiSecret) {
-    return [buildDefault('binance', '*', productType, ts)];
+    throw new Error('Binance fee sync requires both an API key and API secret');
   }
   const baseUrl = options.baseUrl ?? 'https://api.binance.com';
   const params = new URLSearchParams({ timestamp: String(ts) });
@@ -33,35 +40,29 @@ export const fetchBinanceFees = async (
     headers: { 'X-MBX-APIKEY': options.apiKey },
   });
   if (!res.ok) {
-    return [buildDefault('binance', '*', productType, ts)];
+    const reason = (await res.text()).trim() || res.statusText;
+    throw new Error(`Binance fee request failed (${res.status}): ${reason}`);
   }
-  const json = (await res.json()) as BinanceTradeFeeResponse[];
+  const json: unknown = await res.json();
+  if (!Array.isArray(json) || !json.every(isBinanceTradeFee)) {
+    throw new Error('Binance returned an invalid fee response');
+  }
   return json.map((entry) => {
     const makerBps = Number(entry.makerCommission) * 10_000;
     const takerBps = Number(entry.takerCommission) * 10_000;
+    if (!entry.symbol || !Number.isFinite(makerBps) || !Number.isFinite(takerBps)) {
+      throw new Error(
+        `Binance returned an invalid fee entry for ${entry.symbol || 'unknown symbol'}`,
+      );
+    }
     return {
       exchangeCode: 'binance',
       symbol: entry.symbol,
       productType,
-      makerBps: Number.isFinite(makerBps) ? makerBps : BINANCE_DEFAULT_FEES.makerBps,
-      takerBps: Number.isFinite(takerBps) ? takerBps : BINANCE_DEFAULT_FEES.takerBps,
+      makerBps,
+      takerBps,
       effectiveFrom: Math.floor(ts / 1000),
       source: 'binance:sapi',
     } satisfies FeeScheduleUpsert;
   });
 };
-
-const buildDefault = (
-  exchangeCode: string,
-  symbol: string,
-  productType: string,
-  ts: number,
-): FeeScheduleUpsert => ({
-  exchangeCode,
-  symbol,
-  productType,
-  makerBps: BINANCE_DEFAULT_FEES.makerBps,
-  takerBps: BINANCE_DEFAULT_FEES.takerBps,
-  effectiveFrom: Math.floor(ts / 1000),
-  source: 'default',
-});

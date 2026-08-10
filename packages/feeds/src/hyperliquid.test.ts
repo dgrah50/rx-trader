@@ -2,11 +2,25 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RawData } from 'ws';
 import { HyperliquidFeedAdapter, type HyperliquidFeedConfig } from './hyperliquid';
 import type { WebSocketFactory, WebSocketLike } from './websocketFeed';
+import type { MarketTick } from '@rx-trader/core';
+
+type SocketEventArgs = {
+  open: [];
+  message: [data: RawData];
+  error: [error: Error];
+  close: [];
+};
+type SocketEvent = keyof SocketEventArgs;
 
 class MockWebSocket implements WebSocketLike {
   public readonly sent: string[] = [];
   public readyState = 1;
-  private listeners: Record<string, Array<(...args: any[]) => void>> = {};
+  private listeners: { [Event in SocketEvent]: Array<(...args: SocketEventArgs[Event]) => void> } = {
+    open: [],
+    message: [],
+    error: [],
+    close: []
+  };
 
   constructor(public readonly url: string) {}
 
@@ -18,16 +32,13 @@ class MockWebSocket implements WebSocketLike {
     this.emit('close');
   }
 
-  on(event: 'open' | 'message' | 'error' | 'close', listener: (...args: any[]) => void): this {
-    if (!this.listeners[event]) {
-      this.listeners[event] = [];
-    }
-    this.listeners[event]?.push(listener);
+  on<Event extends SocketEvent>(event: Event, listener: (...args: SocketEventArgs[Event]) => void): this {
+    this.listeners[event].push(listener);
     return this;
   }
 
-  emit(event: string, data?: RawData | Error) {
-    this.listeners[event]?.forEach((listener) => listener(data));
+  emit<Event extends SocketEvent>(event: Event, ...args: SocketEventArgs[Event]) {
+    this.listeners[event].forEach((listener) => listener(...args));
   }
 }
 
@@ -44,7 +55,7 @@ describe('HyperliquidFeedAdapter', () => {
     };
     const adapter = new HyperliquidFeedAdapter(config);
 
-    const ticks: any[] = [];
+    const ticks: MarketTick[] = [];
     adapter.feed$.subscribe((tick) => ticks.push(tick));
 
     adapter.connect();
@@ -94,7 +105,7 @@ describe('HyperliquidFeedAdapter', () => {
       webSocketFactory: factory
     };
     const adapter = new HyperliquidFeedAdapter(config);
-    const ticks: any[] = [];
+    const ticks: MarketTick[] = [];
     adapter.feed$.subscribe((tick) => ticks.push(tick));
 
     adapter.connect();
@@ -119,5 +130,25 @@ describe('HyperliquidFeedAdapter', () => {
       last: 2501.2,
       t: 1_700_000_200
     });
+  });
+
+  it('ignores malformed BBO and trade payloads', () => {
+    const socket = new MockWebSocket('ws://test');
+    const adapter = new HyperliquidFeedAdapter({
+      coin: 'BTC',
+      subscriptionType: 'bbo',
+      webSocketFactory: createFactory(socket)
+    });
+    const ticks: MarketTick[] = [];
+    adapter.feed$.subscribe((tick) => ticks.push(tick));
+
+    adapter.connect();
+    socket.emit('open');
+    socket.emit(
+      'message',
+      Buffer.from(JSON.stringify({ channel: 'bbo', data: { coin: 'BTC', time: 1, bbo: {} } }))
+    );
+
+    expect(ticks).toEqual([]);
   });
 });

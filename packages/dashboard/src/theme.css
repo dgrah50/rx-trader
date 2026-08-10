@@ -26,19 +26,6 @@ body {
   }
 }
 
-/* 
-   Override themes to use our new global variables by default 
-   or map them to the new palette if needed. 
-   For now, we want to enforce the "Apple Quant" look, 
-   so we'll let the globals.css variables take precedence 
-   unless specifically overridden for a colored theme.
-*/
-
-.theme-default,
-.theme-default-scaled {
-  /* Use the globals.css values */
-}
-
 .theme-blue,
 .theme-blue-scaled {
   --primary: 221.2 83.2% 53.3%;
@@ -75,8 +62,7 @@ body {
 .theme-mono,
 .theme-mono-scaled {
   --font-sans: var(--font-mono);
-  /* Use globals */
-  
+
   .rounded-xs,
   .rounded-sm,
   .rounded-md,

@@ -18,18 +18,24 @@ describe('HyperliquidBalanceProvider', () => {
       ok: true,
       json: async () => ({
         balances: [
-          { coin: 'USDC', total: '123.45', available: '120.00' },
-          { coin: 'BTC', total: 0.3, available: 0.1 }
-        ]
-      })
+          { coin: 'USDC', total: '123.45', hold: '3.45' },
+          { coin: 'BTC', total: '0.3', hold: '0.2' },
+        ],
+      }),
     } as any);
 
     const provider = new HyperliquidBalanceProvider({ walletAddress: '0xabc' });
     const snapshots = await provider.sync();
-    expect(fetchMock).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.hyperliquid.xyz/info',
+      expect.objectContaining({
+        body: JSON.stringify({ type: 'spotClearinghouseState', user: '0xabc' }),
+      }),
+    );
     expect(snapshots).toHaveLength(2);
     expect(snapshots[0]).toMatchObject({ asset: 'USDC', available: 120 });
-    expect(snapshots[1]).toMatchObject({ asset: 'BTC', available: 0.1, locked: 0.19999999999999998 });
+    expect(snapshots[1]).toMatchObject({ asset: 'BTC', locked: 0.2 });
+    expect(snapshots[1]?.available).toBeCloseTo(0.1);
   });
 
   it('throws when response is not ok', async () => {

@@ -349,7 +349,7 @@ maybeDescribe('runtime end-to-end integration', () => {
     expect(pnlJson?.nav).toBeDefined();
     expect(pnlJson?.feesPaid).toBeCloseTo(feeAmount, 10);
 
-    handle.stop();
+    await handle.stop();
     process.env.PERSIST_THROTTLE_MS = previousThrottle;
     binanceTicks.complete();
     hyperTicks.complete();
@@ -577,7 +577,7 @@ maybeDescribe('runtime end-to-end integration', () => {
       expect(exitOrder.meta?.reason).toBe('EXIT_TIME');
       expect(exitOrder.side).toBe('SELL');
 
-      handle.stop();
+      await handle.stop();
       process.env.PERSIST_THROTTLE_MS = previousThrottle;
       marks$.complete();
       exitIntentSubject.complete();

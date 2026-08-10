@@ -1,4 +1,4 @@
-import { readFileSync, openSync, readSync, closeSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, readSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
 import type { MarketTick } from '@rx-trader/core/domain';
 import { Database } from 'duckdb';
@@ -44,30 +44,25 @@ const summarize = (ticks: MarketTick[], format: TickDatasetMetadata['format'], s
 const sanitizePathForDuckDB = (filePath: string) => filePath.replace(/'/g, "''");
 
 const sampleFile = (filePath: string, bytes = 2048): string => {
+  const fd = openSync(resolve(filePath), 'r');
   try {
-    const fd = openSync(resolve(filePath), 'r');
     const buffer = Buffer.alloc(bytes);
     const length = readSync(fd, buffer, 0, bytes, 0);
-    closeSync(fd);
     return buffer.toString('utf8', 0, length);
-  } catch {
-    return '';
+  } finally {
+    closeSync(fd);
   }
 };
 
 const looksLikeBinanceKlines = (filePath: string): boolean => {
-  try {
-    const firstLine = sampleFile(filePath)
-      .split(/\r?\n/)
-      .find((line) => line.trim().length > 0);
-    if (!firstLine) return false;
-    const parts = firstLine.split(',');
-    if (parts.length < 12) return false;
-    const hasLetters = /[a-zA-Z]/.test(firstLine);
-    return !hasLetters;
-  } catch {
-    return false;
-  }
+  const firstLine = sampleFile(filePath)
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0);
+  if (!firstLine) return false;
+  const parts = firstLine.split(',');
+  if (parts.length < 12) return false;
+  const hasLetters = /[a-zA-Z]/.test(firstLine);
+  return !hasLetters;
 };
 
 const normalizeEpoch = (value: number): number => {

@@ -1,18 +1,16 @@
-import { createControlPlaneRouter } from '@rx-trader/control-plane/app';
-import type { StrategyRuntimeStatus } from '@rx-trader/control-plane/app';
+import { createControlPlaneRouter } from './app';
+import type { StrategyRuntimeStatus } from './app';
 import type { AppConfig } from '@rx-trader/config';
-import type { createEventStore } from '@rx-trader/event-store';
+import type { EventStore } from '@rx-trader/event-store';
 import type { LoggerInstance, MetricsInstance } from '@rx-trader/pipeline';
 import type { BalanceSyncTelemetry } from '@rx-trader/portfolio';
 import type { RebalanceTelemetry } from '@rx-trader/portfolio/rebalancer/service';
 
 import type { DomainEvent } from '@rx-trader/core/domain';
 
-type EventStoreInstance = Awaited<ReturnType<typeof createEventStore>>;
-
 interface ApiServerOptions {
   config: AppConfig;
-  store: EventStoreInstance;
+  store: EventStore;
   logger: LoggerInstance;
   metrics: MetricsInstance;
   live?: boolean;

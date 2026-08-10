@@ -18,12 +18,12 @@ describe('MarketStructureRepository', () => {
       baseSymbol: 'BTC',
       quoteSymbol: 'USDT',
       assetClass: 'SPOT',
-      contractType: 'SPOT'
+      contractType: 'SPOT',
     });
     await repo.upsertExchangeCurrency({
       exchangeCode: 'binance',
       currencySymbol: 'BTC',
-      exchSymbol: 'BTC'
+      exchSymbol: 'BTC',
     });
     await repo.upsertExchangePair({
       exchangeCode: 'binance',
@@ -33,7 +33,7 @@ describe('MarketStructureRepository', () => {
       minLotSize: 0.0001,
       tickSize: 0.01,
       assetClass: 'SPOT',
-      contractType: 'SPOT'
+      contractType: 'SPOT',
     });
 
     const result = await repo.getExchangePair('binance', 'BTCUSDT');
@@ -53,12 +53,21 @@ describe('MarketStructureRepository', () => {
       makerBps: 1.5,
       takerBps: 2.5,
       effectiveFrom,
-      source: 'test'
+      source: 'test',
     });
 
     const schedule = await repo.getFeeSchedule('binance', 'BTCUSDT', 'SPOT');
     expect(schedule?.makerBps).toBeCloseTo(1.5);
     expect(schedule?.source).toBe('test');
+    close();
+  });
+
+  it('returns no fee schedule when the exchange is not configured', async () => {
+    const { repo, close } = makeRepo();
+
+    const schedule = await repo.getFeeSchedule('binance', 'BTCUSDT', 'SPOT');
+
+    expect(schedule).toBeNull();
     close();
   });
 });

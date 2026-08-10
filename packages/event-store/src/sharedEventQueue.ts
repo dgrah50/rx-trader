@@ -20,10 +20,13 @@ export interface SharedQueueProducer {
   depth(): number;
   capacity(): number;
   handles(): SharedQueueHandles;
+  shutdown(): void;
 }
 
 export interface SharedQueueConsumer {
   dequeueBatch(maxItems: number, waitMs: number): DomainEvent[];
+  depth(): number;
+  isShutdown(): boolean;
   shutdown(): void;
 }
 
@@ -88,6 +91,11 @@ class Producer implements SharedQueueProducer {
   handles(): SharedQueueHandles {
     return this.handlesRef;
   }
+
+  shutdown() {
+    Atomics.store(this.control, SHUTDOWN_INDEX, 1);
+    Atomics.notify(this.control, SIZE_INDEX);
+  }
 }
 
 class Consumer implements SharedQueueConsumer {
@@ -130,5 +138,13 @@ class Consumer implements SharedQueueConsumer {
   shutdown() {
     Atomics.store(this.control, SHUTDOWN_INDEX, 1);
     Atomics.notify(this.control, SIZE_INDEX);
+  }
+
+  depth(): number {
+    return Atomics.load(this.control, SIZE_INDEX);
+  }
+
+  isShutdown(): boolean {
+    return Atomics.load(this.control, SHUTDOWN_INDEX) === 1;
   }
 }

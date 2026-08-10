@@ -1,13 +1,7 @@
 import { merge, scan, map, filter } from 'rxjs';
 import type { Observable } from 'rxjs';
-import type { MarketTick } from '@rx-trader/core/domain';
 import { simpleMomentumStrategy, type MomentumStrategyConfig } from './simpleMomentum';
-import type { StrategySignal } from '../types';
-
-interface FeedSource {
-  id: string;
-  feed$: Observable<MarketTick>;
-}
+import type { StrategyFeedSource, StrategySignal } from '../types';
 
 interface MultiFeedMomentumConfig extends MomentumStrategyConfig {
   /**
@@ -50,7 +44,7 @@ const defaultState: AggregationState = {
 };
 
 export const multiFeedMomentumStrategy = (
-  feeds: FeedSource[],
+  feeds: StrategyFeedSource[],
   config: MultiFeedMomentumConfig
 ): Observable<StrategySignal> => {
   if (!feeds.length) {

@@ -39,6 +39,10 @@ const writeParquetFixture = async (file: string) => {
 };
 
 describe('loadTicks', () => {
+  it('reports unreadable CSV files directly', async () => {
+    await expect(loadTicks(fixture('missing.csv'))).rejects.toThrow(/ENOENT/);
+  });
+
   it('loads JSON datasets with metadata and respects limit', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rx-json-'));
     const file = join(dir, 'ticks.json');

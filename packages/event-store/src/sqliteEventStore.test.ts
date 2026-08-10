@@ -57,6 +57,19 @@ describe('SqliteEventStore', () => {
     await store.close();
   });
 
+  it('does not persist or publish duplicate economic keys', async () => {
+    const file = join(tmpDir, `${crypto.randomUUID()}.db`);
+    const store = new SqliteEventStore(file);
+    const streamed: string[] = [];
+    store.stream$.subscribe((event) => streamed.push(event.id));
+    const first = createEvent({ dedupeKey: 'order.new:TEST:42' });
+    const retry = createEvent({ dedupeKey: first.dedupeKey });
+    await store.append([first, retry]);
+    expect(await store.read()).toHaveLength(1);
+    expect(streamed).toEqual([first.id]);
+    await store.close();
+  });
+
   it('waits when the database is briefly locked', async () => {
     const file = join(tmpDir, `${crypto.randomUUID()}.db`);
     const store = new SqliteEventStore(file, { busyTimeoutMs: 100 });

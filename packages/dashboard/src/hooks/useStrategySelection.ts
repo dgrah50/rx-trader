@@ -10,7 +10,7 @@ export interface StrategyOption {
   label: string;
 }
 
-export interface StrategySelectionResult {
+interface StrategySelectionResult {
   rows: StrategyRuntimeStatus[];
   selectedStrategy: StrategyRuntimeStatus | null;
   selectedStrategyId: string;

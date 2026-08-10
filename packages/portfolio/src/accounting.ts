@@ -3,6 +3,8 @@ import type { Fill } from '@rx-trader/core/domain';
 import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
 import { safeParse } from '@rx-trader/core/validation';
+import { normalizeExecutionVenue as normalizeVenue } from '@rx-trader/core/instruments';
+import { deterministicUuid } from '@rx-trader/core/integrity';
 import type { AccountBalanceAdjustedEventData } from './balances/types';
 
 interface FillAccountingOptions {
@@ -13,6 +15,7 @@ interface FillAccountingOptions {
   venue: string;
   enqueue: (event: {
     id: string;
+    dedupeKey?: string;
     type: 'account.balance.adjusted';
     data: AccountBalanceAdjustedEventData;
     ts: number;
@@ -38,10 +41,11 @@ export const wireFillAccounting = (options: FillAccountingOptions): (() => void)
       if (!asset || !Number.isFinite(delta) || delta === 0) {
         return;
       }
+      const ledgerKey = `fill-ledger:${accountId}:${venueId}:${fill.id}:${asset}:${direction}`;
       const payload = safeParse(
         accountBalanceAdjustedSchema,
         {
-          id: crypto.randomUUID(),
+          id: deterministicUuid(`payload:${ledgerKey}`),
           t: ts,
           accountId,
           venue: venueId,
@@ -58,7 +62,8 @@ export const wireFillAccounting = (options: FillAccountingOptions): (() => void)
         { force: true }
       );
       options.enqueue({
-        id: crypto.randomUUID(),
+        id: deterministicUuid(`event:${ledgerKey}`),
+        dedupeKey: ledgerKey,
         type: 'account.balance.adjusted',
         data: payload,
         ts: payload.t
@@ -77,12 +82,4 @@ export const wireFillAccounting = (options: FillAccountingOptions): (() => void)
   });
 
   return () => subscription.unsubscribe();
-};
-
-const normalizeVenue = (value: string) => {
-  const lower = (value ?? '').toLowerCase();
-  if (lower.includes('binance')) return 'binance';
-  if (lower.includes('hyperliquid')) return 'hyperliquid';
-  if (lower.includes('paper')) return 'paper';
-  return value ?? 'paper';
 };

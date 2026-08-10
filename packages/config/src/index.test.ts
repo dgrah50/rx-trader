@@ -40,12 +40,12 @@ describe('loadConfig', () => {
             tradeSymbol: 'ethusdt',
             primaryFeed: 'binance',
             params: { fastWindow: 5 },
-            exit: { enabled: false }
-          }
+            exit: { enabled: false },
+          },
         ],
         RISK_MAX_POSITION: 7,
-        APP_NAME: 'rx-file'
-      })
+        APP_NAME: 'rx-file',
+      }),
     );
 
     process.env.RX_CONFIG_PATH = filePath;
@@ -65,8 +65,8 @@ describe('loadConfig', () => {
       filePath,
       JSON.stringify({
         RISK_MAX_POSITION: 9,
-        APP_NAME: 'rx-json'
-      })
+        APP_NAME: 'rx-json',
+      }),
     );
 
     process.env.RX_CONFIG_PATH = filePath;
@@ -80,9 +80,9 @@ describe('loadConfig', () => {
           type: 'MOMENTUM',
           tradeSymbol: 'btcusdt',
           primaryFeed: 'binance',
-          exit: { enabled: false }
-        }
-      ])
+          exit: { enabled: false },
+        },
+      ]),
     });
     expect(details.sources.RISK_MAX_POSITION.source).toBe('file');
     expect(details.sources.INTENT_MODE.source).toBe('env');
@@ -91,6 +91,12 @@ describe('loadConfig', () => {
     expect(details.configFilePath).toBe(filePath);
 
     unlinkSync(filePath);
+  });
+
+  it('uses only RX_CONFIG_PATH for an explicit config file', () => {
+    process.env.RX_CONFIG = path.join(tmpdir(), `missing-rx-config-${randomUUID()}.json`);
+
+    expect(() => loadConfig({ EVENT_STORE_DRIVER: 'memory' })).not.toThrow();
   });
 
   it('falls back to bundled default strategies when STRATEGIES is empty', () => {
@@ -113,9 +119,9 @@ describe('loadConfig', () => {
         mode: 'sandbox',
         budget: {
           notional: 250000,
-          throttle: { windowMs: 500, maxCount: 2 }
+          throttle: { windowMs: 500, maxCount: 2 },
         },
-        exit: { enabled: false }
+        exit: { enabled: false },
       },
       {
         id: 'arb',
@@ -123,8 +129,8 @@ describe('loadConfig', () => {
         tradeSymbol: 'ethusdt',
         primaryFeed: 'hyperliquid',
         extraFeeds: ['binance'],
-        exit: { enabled: false }
-      }
+        exit: { enabled: false },
+      },
     ]);
 
     const config = loadConfig();
@@ -151,9 +157,9 @@ describe('loadConfig', () => {
         exit: {
           enabled: true,
           time: { enabled: true, maxHoldMs: 60000, minHoldMs: 5000 },
-          tpSl: { enabled: true, tpSigma: 2 }
-        }
-      }
+          tpSl: { enabled: true, tpSigma: 2 },
+        },
+      },
     ]);
 
     const config = loadConfig();
@@ -174,9 +180,9 @@ describe('loadConfig', () => {
         primaryFeed: 'binance',
         exit: {
           enabled: true,
-          trailing: { enabled: true, retracePct: 1.5 }
-        }
-      }
+          trailing: { enabled: true, retracePct: 1.5 },
+        },
+      },
     ]);
 
     expect(() => loadConfig()).toThrow(/STRATEGIES\[0\].exit/i);
@@ -189,8 +195,8 @@ describe('loadConfig', () => {
         type: 'MOMENTUM',
         tradeSymbol: 'btcusdt',
         primaryFeed: 'binance',
-        params: {}
-      }
+        params: {},
+      },
     ]);
 
     expect(() => loadConfig()).toThrow(/exit is required/i);

@@ -22,4 +22,14 @@ describe('fetchHyperliquidMarketStructure', () => {
     expect(snapshot.exchange.code).toBe('hyperliquid');
     expect(snapshot.exchangePairs[0]?.pairSymbol).toContain('BTC');
   });
+
+  it('rejects malformed market metadata instead of trusting response.json()', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ perpetuals: [{ coin: 42 }] }), { status: 200 })
+    );
+
+    await expect(fetchHyperliquidMarketStructure('https://example.com')).rejects.toThrow(
+      'invalid market list'
+    );
+  });
 });

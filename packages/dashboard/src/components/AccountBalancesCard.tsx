@@ -4,7 +4,7 @@ import type { BalanceEntry, BalanceSyncTelemetry } from '../types';
 import { formatAgo, formatNumber } from '../lib/format';
 
 interface AccountBalancesCardProps {
-  balances: Array<BalanceEntry & { venue: string }>;
+  balances: BalanceEntry[];
   updated: number | null;
   balanceSync?: BalanceSyncTelemetry | null;
 }
