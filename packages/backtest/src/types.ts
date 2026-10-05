@@ -73,6 +73,37 @@ export interface BacktestStats {
   };
 }
 
+export interface BacktestIntegrityCheck {
+  name: string;
+  passed: boolean;
+  details: string;
+}
+
+export interface BacktestIntegrityReport {
+  version: 1;
+  status: 'verified' | 'failed';
+  fingerprints: {
+    datasetSha256: string;
+    configSha256: string;
+    eventsSha256: string;
+    eventChainSha256: string;
+    stateSha256: string;
+    replayStateSha256: string;
+    codeSha256?: string;
+    codeCommit?: string;
+    worktreeDirty?: boolean;
+  };
+  counts: {
+    events: number;
+    uniqueEventIds: number;
+    dedupeKeys: number;
+    fills: number;
+    uniqueFills: number;
+    fillLedgerEntries: number;
+  };
+  checks: BacktestIntegrityCheck[];
+}
+
 export interface BacktestArtifact {
   summary: BacktestSummary;
   clock: BacktestClockMetadata;
@@ -81,6 +112,7 @@ export interface BacktestArtifact {
   pnl: ReturnType<typeof pnlProjection.init>;
   events: DomainEvent[];
   stats: BacktestStats;
+  integrity: BacktestIntegrityReport;
 }
 
 export interface BacktestHistoryEntry {
@@ -88,4 +120,5 @@ export interface BacktestHistoryEntry {
   ts: number;
   summary: Partial<BacktestSummary> | null;
   stats?: Partial<BacktestStats> | null;
+  integrity?: Pick<BacktestIntegrityReport, 'status' | 'fingerprints'> | null;
 }

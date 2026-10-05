@@ -86,9 +86,22 @@ describe('snapshotManager', () => {
     expect(snapshot.clock?.capturedMs).toBe(clock.now());
 
     const loaded = loadPositionsSnapshot(file);
+    await store.append({
+      id: crypto.randomUUID(),
+      type: 'account.balance.adjusted',
+      data: {
+        id: crypto.randomUUID(),
+        t: clock.now(),
+        accountId: 'ACC1',
+        venue: 'paper',
+        asset: 'USD',
+        delta: 50,
+      },
+      ts: clock.now(),
+    });
     const replayed = await replayPositionsFromSnapshot(store, loaded);
     expect(replayed.positions.SIM?.pos).toBe(1);
-    expect(replayed.balances?.paper?.USD?.total).toBe(1000);
+    expect(replayed.balances?.paper?.USD?.total).toBe(1050);
 
     rmSync(dir, { recursive: true, force: true });
   });

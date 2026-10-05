@@ -9,12 +9,8 @@ import {
   pairsMeanReversionStrategy,
   arbitrageStrategy
 } from './strategy';
-import type { StrategySignal } from './types';
-
-export interface StrategyFeedSource {
-  id: string;
-  feed$: Observable<MarketTick>;
-}
+import type { StrategyFeedSource, StrategySignal } from './types';
+export type { StrategyFeedSource } from './types';
 
 export interface StrategyContext {
   tradeSymbol: string;

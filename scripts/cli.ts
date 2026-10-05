@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 import { Command } from 'commander';
-import { writeFileSync, existsSync, copyFileSync } from 'node:fs';
+import { writeFileSync, existsSync, copyFileSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
   FeedType,
   StrategyType,
@@ -9,6 +10,8 @@ import {
   parseStrategyType,
 } from '@rx-trader/core/constants';
 import { safeParse } from '@rx-trader/core/validation';
+import { detectExecutionVenue, splitSymbolAssets } from '@rx-trader/core/instruments';
+import { hashCanonical, sha256Hex } from '@rx-trader/core/integrity';
 import {
   marketTickSchema,
   accountBalanceAdjustedSchema,
@@ -38,6 +41,30 @@ import { createScriptClock } from './lib/scriptClock';
 
 const deepClone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
+const captureCodeFingerprint = () => {
+  const options = { cwd: process.cwd(), encoding: 'utf8' as const, maxBuffer: 50 * 1024 * 1024 };
+  const commit = execFileSync('git', ['rev-parse', 'HEAD'], options).trim();
+  const status = execFileSync('git', ['status', '--porcelain=v1'], options);
+  const diff = execFileSync('git', ['diff', '--binary', 'HEAD'], options);
+  const untrackedPaths = execFileSync(
+    'git',
+    ['ls-files', '--others', '--exclude-standard'],
+    options,
+  )
+    .split('\n')
+    .filter(Boolean)
+    .sort();
+  const untracked = untrackedPaths.map((path) => ({
+    path,
+    sha256: sha256Hex(readFileSync(resolve(path))),
+  }));
+  return {
+    codeCommit: commit,
+    worktreeDirty: status.length > 0,
+    codeSha256: hashCanonical({ commit, diff, untracked }),
+  };
+};
+
 const setupLog = (message: string) => {
   console.log(`[setup] ${message}`);
 };
@@ -66,29 +93,7 @@ const supportedExchangeFetchers = {
 } as const;
 
 const feedToVenue = (feed?: FeedType | null) => {
-  if (!feed) return 'paper';
-  switch (feed) {
-    case FeedType.Binance:
-      return 'binance';
-    case FeedType.Hyperliquid:
-      return 'hyperliquid';
-    default:
-      return 'paper';
-  }
-};
-
-const inferAssetsFromSymbol = (symbol: string) => {
-  const upper = (symbol ?? '').toUpperCase();
-  const candidates = ['USDT', 'USD', 'USDC', 'BTC', 'ETH', 'BNB', 'EUR', 'JPY'];
-  for (const candidate of candidates) {
-    if (upper.endsWith(candidate) && upper.length > candidate.length) {
-      return {
-        base: upper.slice(0, -candidate.length),
-        quote: candidate,
-      };
-    }
-  }
-  return { base: upper || 'BTC', quote: 'USD' };
+  return detectExecutionVenue(feed) ?? 'paper';
 };
 
 const syncMarketStructures = async (exchanges: string[], sqlitePath: string, dryRun: boolean) => {
@@ -124,7 +129,7 @@ const syncMarketStructures = async (exchanges: string[], sqlitePath: string, dry
                     apiSecret: process.env.BINANCE_API_SECRET,
                   }
                 : undefined,
-            hyperliquid: {},
+            hyperliquid: { user: process.env.HYPERLIQUID_WALLET_ADDRESS },
           });
           setupLog(`Synced ${feeCount} fee entries for ${code}`);
         } catch (error) {
@@ -150,7 +155,10 @@ const seedDemoEventStore = async (config: AppConfig, dryRun: boolean) => {
   const primaryStrategy = config.strategies[0];
   const symbol = primaryStrategy?.tradeSymbol ?? 'BTCUSDT';
   const venue = feedToVenue(primaryStrategy?.primaryFeed);
-  const { quote: quoteAsset } = inferAssetsFromSymbol(symbol);
+  const { quote: quoteAsset } = splitSymbolAssets(symbol) ?? {
+    base: symbol.toUpperCase() || 'BTC',
+    quote: 'USD',
+  };
   await store.append({
     id: crypto.randomUUID(),
     type: 'account.balance.adjusted',
@@ -334,7 +342,7 @@ export const buildProgram = (): Command => {
       if (dashboardProc) {
         dashboardProc.kill();
       }
-      handle.stop();
+      await handle.stop();
       await waitForDashboard();
     };
 
@@ -505,7 +513,7 @@ export const buildProgram = (): Command => {
             apiKey: process.env.BINANCE_API_KEY,
             apiSecret: process.env.BINANCE_API_SECRET,
           },
-          hyperliquid: {},
+          hyperliquid: { user: process.env.HYPERLIQUID_WALLET_ADDRESS },
         });
         console.log(`[fees] upserted ${count} entries for ${venue} in ${sqlitePath}`);
       } finally {
@@ -595,6 +603,7 @@ export const buildProgram = (): Command => {
       });
 
       const stats = result.stats;
+      Object.assign(result.integrity.fingerprints, captureCodeFingerprint());
       const summary = {
         symbol,
         dataset: dataset.metadata,
@@ -631,6 +640,7 @@ export const buildProgram = (): Command => {
         pnl: result.pnl,
         events: result.events,
         stats,
+        integrity: result.integrity,
       };
 
       writeFileSync(resolve(opts.out), JSON.stringify(artifact, null, 2));

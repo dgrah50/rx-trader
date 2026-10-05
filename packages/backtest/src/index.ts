@@ -18,7 +18,14 @@ import {
 import { BacktestScheduler } from './scheduler';
 import { HistoricalFeedAdapter } from './historicalFeedAdapter';
 import { createBacktestExecutionManager } from './execution';
+import { verifyBacktestIntegrity } from './integrity';
+import type {
+  BacktestClockEngineMetadata,
+  BacktestIntegrityReport,
+  BacktestStats,
+} from './types';
 export * from './types';
+export * from './integrity';
 export type { TickDatasetMetadata } from './loaders';
 
 type PositionsState = ReturnType<typeof positionsProjection.init>;
@@ -42,6 +49,8 @@ interface ExecutionOverrides {
   mode?: 'market' | 'limit' | 'makerPreferred' | 'takerOnDrift';
   notionalUsd?: number;
   defaultQty?: number;
+  makerFeeBps?: number;
+  takerFeeBps?: number;
 }
 
 interface EngineBacktestOptions {
@@ -52,56 +61,14 @@ interface EngineBacktestOptions {
   execution?: ExecutionOverrides;
 }
 
-interface BacktestClockMetadata {
-  type: 'backtest-scheduler';
-  startMs: number;
-  endMs: number;
-  spanMs: number;
-  ticks: number;
-}
-
 interface EngineBacktestResult {
   events: DomainEvent[];
   positions: PositionsState;
   pnl: PnlState;
   navCurve: Array<{ t: number; nav: number }>;
   stats: BacktestStats;
-  clock: BacktestClockMetadata;
-}
-
-interface BacktestStats {
-  wallRuntimeMs: number;
-  startupMs: number;
-  replayMs: number;
-  settleMs: number;
-  teardownMs: number;
-  ticksProcessed: number;
-  tickSpanMs: number;
-  ticksPerSecond: number;
-  eventsPerSecond: number;
-  eventCounts: EventCountStats;
-  nav: NavStats;
-}
-
-interface EventCountStats {
-  orderNew: number;
-  orderAck: number;
-  orderReject: number;
-  orderFill: number;
-  pnlAnalytics: number;
-  portfolioSnapshots: number;
-}
-
-interface NavStats {
-  startNav: number;
-  endNav: number;
-  change: number;
-  changePct: number;
-  maxDrawdown: number;
-  maxDrawdownPct: number;
-  sharpe: number;
-  volatility: number;
-  samples: number;
+  integrity: BacktestIntegrityReport;
+  clock: BacktestClockEngineMetadata;
 }
 
 const buildEnvOverrides = (
@@ -152,6 +119,12 @@ const buildEnvOverrides = (
     INTENT_COOLDOWN_MS: '0',
     INTENT_DEDUPE_WINDOW_MS: '0',
     INTENT_TIF: 'DAY',
+    ...(options.execution?.makerFeeBps !== undefined
+      ? { MAKER_FEE_BPS: String(options.execution.makerFeeBps) }
+      : {}),
+    ...(options.execution?.takerFeeBps !== undefined
+      ? { TAKER_FEE_BPS: String(options.execution.takerFeeBps) }
+      : {}),
     SQLITE_PATH: sqlitePath,
   };
 };
@@ -216,6 +189,7 @@ export const runBacktest = async (
   const handle = await startEngine({
     live: false,
     registerSignalHandlers: false,
+    persistPortfolioUpdatesImmediately: true,
     clock: scheduler,
     configOverrides,
     dependencies,
@@ -234,7 +208,7 @@ export const runBacktest = async (
   await delay(0);
   const afterSettle = performance.now();
 
-  handle.stop();
+  await handle.stop();
   const afterStop = performance.now();
 
   rmSync(sqlitePath, { force: true });
@@ -263,7 +237,7 @@ export const runBacktest = async (
     },
   });
 
-  const clock: BacktestClockMetadata = {
+  const clock: BacktestClockEngineMetadata = {
     type: 'backtest-scheduler',
     startMs: sortedTicks[0]!.t,
     endMs: sortedTicks[sortedTicks.length - 1]!.t,
@@ -271,7 +245,18 @@ export const runBacktest = async (
     ticks: sortedTicks.length,
   };
 
-  return { events, positions, pnl, navCurve, stats, clock };
+  const integrity = verifyBacktestIntegrity({
+    ticks: sortedTicks,
+    config: Object.fromEntries(
+      Object.entries(configOverrides).filter(([key]) => key !== 'SQLITE_PATH'),
+    ),
+    events,
+    positions,
+    pnl,
+    eventCounts: stats.eventCounts,
+  });
+
+  return { events, positions, pnl, navCurve, stats, clock, integrity };
 };
 
 export { loadTicks } from './loaders';
@@ -323,7 +308,7 @@ const computeBacktestStats = ({
 const computeNavStats = (
   navCurve: Array<{ t: number; nav: number }>,
   latestNav: number,
-): NavStats => {
+): BacktestStats['nav'] => {
   if (!navCurve.length) {
     return {
       startNav: latestNav,
@@ -381,8 +366,8 @@ const computeNavStats = (
   };
 };
 
-const countEvents = (events: DomainEvent[]): EventCountStats => {
-  return events.reduce<EventCountStats>(
+const countEvents = (events: DomainEvent[]): BacktestStats['eventCounts'] => {
+  return events.reduce<BacktestStats['eventCounts']>(
     (acc, event) => {
       switch (event.type) {
         case 'order.new':

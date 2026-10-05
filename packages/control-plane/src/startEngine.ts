@@ -1,4 +1,5 @@
 import { EVENT_TYPE } from '@rx-trader/core';
+import { deterministicUuid, hashCanonical } from '@rx-trader/core/integrity';
 import { monitorPostTradeRisk } from '@rx-trader/risk/postTrade';
 import { portfolio$, portfolioAnalytics$ } from '@rx-trader/portfolio';
 import type {
@@ -7,21 +8,18 @@ import type {
   PortfolioSnapshot,
   BalanceEntry,
   DomainEvent,
-  OrderNew
+  OrderNew,
 } from '@rx-trader/core/domain';
 import { accountBalanceAdjustedSchema } from '@rx-trader/core/domain';
 import { startApiServer } from './apiServer';
 import { buildRuntime } from './runtimeBuilder';
-import type {
-  BalanceProviderFactoryInput,
-  StartEngineOptions
-} from './runtimeTypes';
+import type { BalanceProviderFactoryInput, StartEngineOptions } from './runtimeTypes';
 import {
   createIntentReconciler,
   ExecutionCircuitOpenError,
   createStrategyTelemetry,
   createExitEngine,
-  type ExitEngineHandle
+  type ExitEngineHandle,
 } from '@rx-trader/pipeline';
 import { auditTime, filter, map, distinctUntilChanged } from 'rxjs';
 import type { Observable, Subscription } from 'rxjs';
@@ -30,24 +28,32 @@ import {
   BinanceBalanceProvider,
   HyperliquidBalanceProvider,
   MockBalanceProvider,
-  type BalanceProvider
+  type BalanceProvider,
 } from '@rx-trader/portfolio';
 import type { AppConfig } from '@rx-trader/config';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
 import { wireFillAccounting } from '@rx-trader/portfolio';
 import { safeParse } from '@rx-trader/core/validation';
+import {
+  normalizeExecutionVenue as normalizeVenue,
+  splitSymbolAssets,
+} from '@rx-trader/core/instruments';
 import type { InstrumentMetadata } from '@rx-trader/pipeline';
-import { RebalanceService, TransferExecutionService, createTransferProviders } from '@rx-trader/portfolio';
+import {
+  RebalanceService,
+  TransferExecutionService,
+  createTransferProviders,
+} from '@rx-trader/portfolio';
 import type { EventStore } from '@rx-trader/event-store';
 import { createAuditLogger } from './auditLogger';
 import { toPricePoints } from '@rx-trader/strategies/utils';
 export type { EngineDependencies, StartEngineOptions } from './runtimeTypes';
 
-type AccountBalanceAdjusted = ReturnType<typeof accountBalanceAdjustedSchema['parse']>;
+type AccountBalanceAdjusted = ReturnType<(typeof accountBalanceAdjustedSchema)['parse']>;
 
 export interface EngineHandle {
-  stop: () => void;
+  stop: () => Promise<void>;
 }
 
 export const startEngine = async (options: StartEngineOptions = {}): Promise<EngineHandle> => {
@@ -72,7 +78,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     marginGuard,
     exitIntentSink,
     eventBus,
-    reconcile$
+    reconcile$,
   } = await buildRuntime({ ...options, clock }, options.dependencies);
 
   const { RingBuffer } = await import('@rx-trader/core');
@@ -93,7 +99,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     EVENT_TYPE.ACCOUNT_BALANCE_ADJUSTED,
     EVENT_TYPE.ACCOUNT_BALANCE_SNAPSHOT,
     EVENT_TYPE.ACCOUNT_TRANSFER,
-    EVENT_TYPE.RISK_CHECK
+    EVENT_TYPE.RISK_CHECK,
   ]);
 
   eventBus.onAll().subscribe((event) => {
@@ -105,17 +111,16 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   const auditEnabled = Boolean(
     process.env.AUDIT_LOG_PATH ||
       (process.env.AUDIT_VERBOSE ?? '').toLowerCase() === 'true' ||
-      process.env.AUDIT_VERBOSE === '1'
+      process.env.AUDIT_VERBOSE === '1',
   );
   const audit = createAuditLogger({
     enabled: auditEnabled,
     path: process.env.AUDIT_LOG_PATH,
-    logger
+    logger,
   });
 
   const exitHandles: ExitEngineHandle[] = [];
   const exitSubscriptions: Subscription[] = [];
-
 
   const venueId = instrument.venue ?? execution.adapter.id;
   const normalizedVenue = normalizeVenue(venueId);
@@ -139,7 +144,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
           available: entry.available,
           locked: entry.locked,
           total: entry.total,
-          lastUpdated: entry.lastUpdated
+          lastUpdated: entry.lastUpdated,
         }
       : null;
 
@@ -155,7 +160,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     }
     return {
       base: summarizeBalanceEntry(baseEntry ?? null),
-      quote: summarizeBalanceEntry(quoteEntry ?? null)
+      quote: summarizeBalanceEntry(quoteEntry ?? null),
     };
   };
 
@@ -177,7 +182,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       baseAfter: baseStart + baseDelta,
       quoteAfter: quoteStart + quoteDelta,
       baseDelta,
-      quoteDelta
+      quoteDelta,
     };
   };
 
@@ -191,26 +196,26 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     store,
     accountState,
     instrument,
-    clock
+    clock,
   });
 
   const initialCash = getInitialCashBalance({
     accountState,
     venue: normalizedVenue,
     quoteAsset,
-    fallback: seedResult?.amount
+    fallback: seedResult?.amount,
   });
 
   const cashAdjustments$ = createQuoteCashAdjustment$({
     store,
     venue: normalizedVenue,
-    quoteAsset
+    quoteAsset,
   });
 
   const fillLedger$ = createQuoteFillLedger$({
     store,
     venue: normalizedVenue,
-    quoteAsset
+    quoteAsset,
   });
 
   fillLedger$?.subscribe(({ orderId, amount }) => {
@@ -218,22 +223,24 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     logAudit('quote-ledger', {
       orderId,
       ledgerAmount: amount,
-      quoteReserve: describeQuoteReserve()
+      quoteReserve: describeQuoteReserve(),
     });
   });
 
   const strategyTelemetry = createStrategyTelemetry({
-    strategies: strategyRuntimes.map(r => r.definition),
+    strategies: strategyRuntimes,
     eventBus,
-    clock
+    clock,
   });
 
   rejected$.subscribe((decision) => {
     metrics.riskRejected.inc();
     logger.warn({ reasons: decision.reasons }, 'Order rejected');
-    
+
+    const orderDedupeKey = `order.new:${config.execution.account}:${decision.order.id}`;
     eventBus.emit({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${orderDedupeKey}`),
+      dedupeKey: orderDedupeKey,
       type: 'order.reject',
       data: {
         id: decision.order.id,
@@ -243,8 +250,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       ts: clock.now(),
       metadata: {
         reasons: decision.reasons,
-        risk: true
-      }
+        risk: true,
+      },
     });
 
     logAudit('risk-rejected', {
@@ -256,7 +263,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       reasons: decision.reasons,
       balances: captureBalances(),
       quoteReserve: describeQuoteReserve(),
-      margin: describeMarginState()
+      margin: describeMarginState(),
     });
   });
 
@@ -272,23 +279,16 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       balancesBefore,
       projection,
       margin: describeMarginState(),
-      quoteReserve: describeQuoteReserve()
+      quoteReserve: describeQuoteReserve(),
     });
     logger.info({ fill }, 'Fill event');
-    
-    eventBus.emit({
-        id: crypto.randomUUID(),
-        type: 'order.fill',
-        data: fill,
-        ts: clock.now()
-    });
 
     if (fill.fee && fill.fee > 0) {
       accountGuard?.consume?.(fill.orderId, fill.fee);
       logAudit('quote-reserve', {
         orderId: fill.orderId,
         fee: fill.fee,
-        quoteReserve: describeQuoteReserve()
+        quoteReserve: describeQuoteReserve(),
       });
     }
 
@@ -304,19 +304,12 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       reconcile$?.next(order);
     }
 
-    eventBus.emit({
-        id: crypto.randomUUID(),
-        type: 'order.reject',
-        data: reject,
-        ts: clock.now()
-    });
-
     accountGuard?.release?.(reject.id);
     logAudit('execution-reject', {
       orderId: reject.id,
       reason: reject.reason,
       quoteReserve: describeQuoteReserve(),
-      margin: describeMarginState()
+      margin: describeMarginState(),
     });
   });
 
@@ -327,15 +320,16 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     venue: instrument.venue ?? execution.adapter.id,
     accountId: config.execution.account,
     clock,
-    enqueue: (event) => eventBus.emit(event)
+    enqueue: (event) => eventBus.emit(event),
   });
 
-  const balanceProviderFactory = options.dependencies?.createBalanceProvider ?? createBalanceProvider;
+  const balanceProviderFactory =
+    options.dependencies?.createBalanceProvider ?? createBalanceProvider;
   const balanceProvider = balanceProviderFactory({
     instrument,
     config,
     feedManager,
-    live
+    live,
   });
   const driftThreshold =
     live && (config.accounting?.balanceSyncMaxDriftBps ?? null) !== null
@@ -361,8 +355,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       recordFailure: ({ venue }) => {
         metrics.balanceSyncStatus.set({ venue }, 0);
         metrics.balanceSyncFailures.inc({ venue });
-      }
-    }
+      },
+    },
   });
   await balanceSync.start();
   const balanceTelemetry = () => balanceSync.getTelemetry();
@@ -374,7 +368,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     logger,
     metrics,
     accountId: config.execution.account,
-    enqueue: (event) => eventBus.emit(event)
+    enqueue: (event) => eventBus.emit(event),
   });
   await rebalancer.start();
 
@@ -385,11 +379,11 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     providers: createTransferProviders({
       mode: config.rebalancer.executor.mode,
       live,
-      logger
+      logger,
     }),
     logger,
     metrics,
-    clock
+    clock,
   });
   transferExecutor.start();
 
@@ -401,7 +395,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     adapter: execution.adapter,
     ack$: execution.acks$,
     fills$: execution.fills$,
-    rejects$: execution.rejects$
+    rejects$: execution.rejects$,
   });
 
   approved$.subscribe(async (decision) => {
@@ -417,7 +411,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       notional,
       balances: captureBalances(),
       quoteReserve: describeQuoteReserve(),
-      margin: describeMarginState()
+      margin: describeMarginState(),
     });
     if (accountGuard && decision.notional && decision.order.side === 'BUY') {
       accountGuard.reserve?.(decision.order.id, decision.notional);
@@ -426,15 +420,15 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
         orderId: decision.order.id,
         reserved: decision.notional,
         baseQty: decision.order.qty,
-        quoteReserve: describeQuoteReserve()
+        quoteReserve: describeQuoteReserve(),
       });
     }
-    
+
     eventBus.emit({
       id: crypto.randomUUID(),
       type: 'order.new',
       data: decision.order,
-      ts: clock.now()
+      ts: clock.now(),
     });
 
     logAudit('order-new', {
@@ -445,7 +439,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       px,
       notional,
       quoteReserve: describeQuoteReserve(),
-      margin: describeMarginState()
+      margin: describeMarginState(),
     });
     const release = intentReconciler.track(decision.order);
     try {
@@ -462,7 +456,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
         px,
         status: 'submitted',
         quoteReserve: describeQuoteReserve(),
-        margin: describeMarginState()
+        margin: describeMarginState(),
       });
     } catch (error) {
       release();
@@ -472,20 +466,22 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       if (error instanceof ExecutionCircuitOpenError) {
         const reason = `circuit-open:${execution.adapter.id}`;
         logger.error({ orderId: decision.order.id, reason }, 'Execution blocked by circuit');
-        
+
         eventBus.emit({
           id: crypto.randomUUID(),
           type: 'order.reject',
           data: {
             id: decision.order.id,
             t: clock.now(),
-            reason
+            reason,
           },
-          ts: clock.now()
+          ts: clock.now(),
         });
-
       } else {
-        logger.error({ error: error instanceof Error ? error.message : error }, 'Execution submit error');
+        logger.error(
+          { error: error instanceof Error ? error.message : error },
+          'Execution submit error',
+        );
       }
       accountGuard?.release?.(decision.order.id);
       logAudit('order-submit-error', {
@@ -496,22 +492,26 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
         px,
         error: error instanceof Error ? error.message : String(error),
         quoteReserve: describeQuoteReserve(),
-        margin: describeMarginState()
+        margin: describeMarginState(),
       });
     }
   });
 
   const snapshots$ = portfolio$(
     { fills$, marks$: feedManager.marks$, cashAdjustments$, initialCash },
-    clock
+    clock,
   );
   const analytics$ = portfolioAnalytics$(snapshots$);
   const hookSubscriptions: Subscription[] = [];
   if (options.hooks?.onSnapshot) {
-    hookSubscriptions.push(snapshots$.subscribe((snapshot) => options.hooks?.onSnapshot?.(snapshot)));
+    hookSubscriptions.push(
+      snapshots$.subscribe((snapshot) => options.hooks?.onSnapshot?.(snapshot)),
+    );
   }
   if (options.hooks?.onAnalytics) {
-    hookSubscriptions.push(analytics$.subscribe((analytics) => options.hooks?.onAnalytics?.(analytics)));
+    hookSubscriptions.push(
+      analytics$.subscribe((analytics) => options.hooks?.onAnalytics?.(analytics)),
+    );
   }
 
   strategyRuntimes.forEach((runtime) => {
@@ -522,7 +522,7 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     const symbol = runtime.definition.tradeSymbol;
     const positionsForSymbol$ = snapshots$.pipe(
       map((snapshot) => snapshot.positions[symbol] ?? null),
-      distinctUntilChanged(positionsEqual)
+      distinctUntilChanged(positionsEqual),
     );
     const price$ = runtime.feedManager.marks$.pipe(toPricePoints(symbol));
     const exitHandle = createExitEngine({
@@ -533,8 +533,8 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
       clock,
       positions$: positionsForSymbol$,
       price$,
-      signals$: runtime.signals$, 
-      analytics$
+      signals$: runtime.signals$,
+      analytics$,
     });
     if ((process.env.DEBUG_E2E ?? '').toLowerCase() === 'true') {
       logger.info({ strategyId: runtime.definition.id }, 'Exit engine wired');
@@ -543,13 +543,14 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     const sub = exitHandle.exitIntents$.subscribe((order) => {
       exitIntentSink.next(order);
       options.hooks?.onExitIntent?.(order);
-      const reason = typeof order.meta?.reason === 'string' ? (order.meta.reason as string) : undefined;
+      const reason =
+        typeof order.meta?.reason === 'string' ? (order.meta.reason as string) : undefined;
       strategyTelemetry.recordExit(runtime.definition.id, reason);
       logAudit('exit-intent', {
         order,
         balances: captureBalances(),
         quoteReserve: describeQuoteReserve(),
-        margin: describeMarginState()
+        margin: describeMarginState(),
       });
     });
     exitSubscriptions.push(sub);
@@ -558,27 +559,37 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
   monitorPostTradeRisk(snapshots$, { navFloor: -10_000, maxDrawdown: 5_000 }).subscribe(
     (decision) => {
       logger.error({ action: decision.action, reason: decision.reason }, 'Risk breach');
-    }
+    },
   );
 
   const persistThrottleMs = Number(process.env.PERSIST_THROTTLE_MS ?? '250');
+  const persistedSnapshots$ = options.persistPortfolioUpdatesImmediately
+    ? snapshots$
+    : snapshots$.pipe(auditTime(persistThrottleMs));
+  const persistedAnalytics$ = options.persistPortfolioUpdatesImmediately
+    ? analytics$
+    : analytics$.pipe(auditTime(persistThrottleMs));
 
-  snapshots$.pipe(auditTime(persistThrottleMs)).subscribe((snapshot) => {
+  persistedSnapshots$.subscribe((snapshot) => {
+    const dedupeKey = `portfolio.snapshot:${hashCanonical(snapshot)}`;
     eventBus.emit({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'portfolio.snapshot',
       data: snapshot,
-      ts: snapshot.t
+      ts: snapshot.t,
     });
   });
 
-  analytics$.pipe(auditTime(persistThrottleMs)).subscribe((analytics: PortfolioAnalytics) => {
+  persistedAnalytics$.subscribe((analytics: PortfolioAnalytics) => {
     metrics.portfolioNav.set(analytics.nav);
+    const dedupeKey = `pnl.analytics:${hashCanonical(analytics)}`;
     eventBus.emit({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'pnl.analytics',
       data: analytics,
-      ts: analytics.t
+      ts: analytics.t,
     });
   });
 
@@ -592,55 +603,53 @@ export const startEngine = async (options: StartEngineOptions = {}): Promise<Eng
     runtimeMeta: {
       live,
       strategies: () => strategyTelemetry.snapshot(),
-      events: () => ringBuffer.getRecent(100)
+      events: () => ringBuffer.getRecent(100),
     },
     accounting: { balanceTelemetry },
-    rebalancer: () => rebalancer.getTelemetry()
+    rebalancer: () => rebalancer.getTelemetry(),
   });
 
-  let stopped = false;
-  const handleShutdown = () => {
-    if (stopped) return;
-    stopped = true;
-    exitSubscriptions.forEach((sub) => sub.unsubscribe());
-    exitHandles.forEach((handle) => handle.stop());
-    exitIntentSink.complete();
-    try {
-      feedManager.stop();
-    } catch (error) {
-      logger?.warn?.({ error }, 'Failed to stop feed manager');
-    }
-    persistence.shutdown();
-    marketStore.close();
-    stopAccounting();
-    balanceSync.stop();
-    rebalancer.stop();
-    transferExecutor.stop();
-    strategyTelemetry.stop();
-    accountState.stop();
-    intentReconciler.stop();
-    audit.close();
-    hookSubscriptions.forEach((sub) => sub.unsubscribe());
-    if (stopApi) {
-      void stopApi();
-    }
+  let shutdownPromise: Promise<void> | null = null;
+  const handleShutdown = (): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+      exitSubscriptions.forEach((sub) => sub.unsubscribe());
+      exitHandles.forEach((handle) => handle.stop());
+      exitIntentSink.complete();
+      try {
+        feedManager.stop();
+      } catch (error) {
+        logger?.warn?.({ error }, 'Failed to stop feed manager');
+      }
+      stopAccounting();
+      balanceSync.stop();
+      rebalancer.stop();
+      transferExecutor.stop();
+      strategyTelemetry.stop();
+      intentReconciler.stop();
+      hookSubscriptions.forEach((sub) => sub.unsubscribe());
+      await persistence.shutdown();
+      accountState.stop();
+      marketStore.close();
+      audit.close();
+      if (stopApi) await stopApi();
+    })();
+    return shutdownPromise;
   };
 
   if (registerSignals) {
-    process.on('SIGINT', handleShutdown);
-    process.on('SIGTERM', handleShutdown);
+    process.on('SIGINT', () => void handleShutdown());
+    process.on('SIGTERM', () => void handleShutdown());
   }
 
   logger.info({ live, gatewayPort: config.gateway.port }, 'Trader running');
 
   return {
-    stop: handleShutdown
+    stop: handleShutdown,
   };
 };
 
-const createBalanceProvider = (
-  input: BalanceProviderFactoryInput
-): BalanceProvider => {
+const createBalanceProvider = (input: BalanceProviderFactoryInput): BalanceProvider => {
   const venueId = normalizeVenue(input.instrument.venue ?? input.instrument.symbol);
   if (venueId === 'binance' && input.config.venues?.binance && input.live) {
     return new BinanceBalanceProvider(input.config.venues.binance);
@@ -650,14 +659,14 @@ const createBalanceProvider = (
     return new HyperliquidBalanceProvider({
       walletAddress: hyperConfig.walletAddress,
       subaccount: hyperConfig.subaccount ?? 0,
-      baseUrl: hyperConfig.baseUrl
+      baseUrl: hyperConfig.baseUrl,
     });
   }
 
   const assets = inferAssetsFromSymbol(
     input.instrument.symbol,
     input.instrument.baseAsset,
-    input.instrument.quoteAsset
+    input.instrument.quoteAsset,
   );
 
   return new MockBalanceProvider({
@@ -665,30 +674,31 @@ const createBalanceProvider = (
     baseAsset: assets.base,
     quoteAsset: assets.quote,
     marks$: input.feedManager.marks$,
-    fallbackPrice: 100
+    fallbackPrice: 100,
   });
 };
 
 const positionsEqual = (
   a: PortfolioSnapshot['positions'][string] | null,
-  b: PortfolioSnapshot['positions'][string] | null
+  b: PortfolioSnapshot['positions'][string] | null,
 ): boolean => {
   if (a === b) return true;
   if (!a || !b) return false;
   const posEqual = Math.abs(a.pos - b.pos) < 1e-12;
   const avgPxEqual = Math.abs(a.avgPx - b.avgPx) < 1e-9;
-  const notionalEqual = Math.abs((a.notional ?? a.px * a.pos) - (b.notional ?? b.px * b.pos)) < 1e-2;
+  const notionalEqual =
+    Math.abs((a.notional ?? a.px * a.pos) - (b.notional ?? b.px * b.pos)) < 1e-2;
   return posEqual && avgPxEqual && notionalEqual;
 };
 
 const isBalanceAdjustedEvent = (
-  event: DomainEvent
+  event: DomainEvent,
 ): event is DomainEvent<'account.balance.adjusted'> => event.type === 'account.balance.adjusted';
 
 const createQuoteCashAdjustment$ = ({
   store,
   venue,
-  quoteAsset
+  quoteAsset,
 }: {
   store: Pick<EventStore, 'stream$'>;
   venue?: string;
@@ -704,14 +714,14 @@ const createQuoteCashAdjustment$ = ({
     filter((data) => normalizeVenue(data.venue) === normalizedVenue),
     filter((data) => data.asset === quoteAsset),
     filter((data) => data.reason !== 'fill'),
-    map((data) => data.delta)
+    map((data) => data.delta),
   );
 };
 
 const createQuoteFillLedger$ = ({
   store,
   venue,
-  quoteAsset
+  quoteAsset,
 }: {
   store: Pick<EventStore, 'stream$'>;
   venue?: string;
@@ -729,10 +739,10 @@ const createQuoteFillLedger$ = ({
     filter((data) => data.asset === quoteAsset),
     map((data) => ({
       orderId: extractOrderId(data.metadata),
-      amount: Math.abs(data.delta)
+      amount: Math.abs(data.delta),
     })),
     filter((payload) => Boolean(payload.orderId) && payload.amount > 0),
-    map((payload) => ({ orderId: payload.orderId!, amount: payload.amount }))
+    map((payload) => ({ orderId: payload.orderId!, amount: payload.amount })),
   );
 };
 
@@ -745,7 +755,7 @@ const getInitialCashBalance = ({
   accountState,
   venue,
   quoteAsset,
-  fallback
+  fallback,
 }: {
   accountState: { getBalance: (venue: string, asset: string) => BalanceEntry | undefined };
   venue: string;
@@ -768,7 +778,7 @@ const seedDemoBalanceIfNeeded = async ({
   store,
   accountState,
   instrument,
-  clock
+  clock,
 }: {
   live: boolean;
   config: AppConfig;
@@ -786,11 +796,13 @@ const seedDemoBalanceIfNeeded = async ({
   if (existing && existing.total > 0) {
     return { amount: existing.total, venue, asset: quoteAsset };
   }
+  const seedKey = `account.seed:${config.execution.account}:${venue}:${quoteAsset}`;
   const event = {
-    id: crypto.randomUUID(),
+    id: deterministicUuid(`event:${seedKey}`),
+    dedupeKey: seedKey,
     type: 'account.balance.adjusted' as const,
     data: safeParse(accountBalanceAdjustedSchema, {
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`payload:${seedKey}`),
       t: clock.now(),
       accountId: config.execution.account,
       venue,
@@ -798,43 +810,26 @@ const seedDemoBalanceIfNeeded = async ({
       delta: seedAmount,
       reason: 'deposit',
       metadata: {
-        seed: 'demo'
-      }
+        seed: 'demo',
+      },
     }),
-    ts: clock.now()
+    ts: clock.now(),
   };
   await store.append(event);
   return { amount: seedAmount, venue, asset: quoteAsset };
 };
 
-const normalizeVenue = (value: string) => {
-  const lower = (value ?? '').toLowerCase();
-  if (lower.includes('binance')) return 'binance';
-  if (lower.includes('hyperliquid')) return 'hyperliquid';
-  if (lower.includes('paper')) return 'paper';
-  return value ?? 'paper';
-};
-
 const inferAssetsFromSymbol = (
   symbol: string,
   base?: string,
-  quote?: string
+  quote?: string,
 ): { base: string; quote: string } => {
   if (base && quote) {
     return { base, quote };
   }
-  const upper = symbol.toUpperCase();
-  const candidates = ['USDT', 'USD', 'USDC', 'BTC', 'ETH', 'BNB', 'EUR', 'JPY'];
-  for (const candidate of candidates) {
-    if (upper.endsWith(candidate) && upper.length > candidate.length) {
-      return {
-        base: base ?? upper.slice(0, -candidate.length),
-        quote: quote ?? candidate
-      };
-    }
-  }
+  const inferred = splitSymbolAssets(symbol);
   return {
-    base: base ?? upper,
-    quote: quote ?? 'USD'
+    base: base ?? inferred?.base ?? symbol.toUpperCase(),
+    quote: quote ?? inferred?.quote ?? 'USD',
   };
 };

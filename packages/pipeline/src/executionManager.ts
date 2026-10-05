@@ -1,4 +1,4 @@
-import { filter, map, share } from 'rxjs';
+import { distinct, filter, map, share } from 'rxjs';
 import type { Observable } from 'rxjs';
 import type {
   Fill,
@@ -124,7 +124,8 @@ export const createExecutionManager = (
           purgePending((event.data as OrderCancelReq).id);
         }
         return event;
-      })
+      }),
+      distinct((event) => event.dedupeKey ?? event.id),
     )
     .pipe(share());
 

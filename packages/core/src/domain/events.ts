@@ -72,6 +72,7 @@ export const EVENT_TYPE = {
 
 export interface DomainEvent<TType extends DomainEventType = DomainEventType, TData = unknown> {
   id: string;
+  dedupeKey?: string;
   type: TType;
   data: TData;
   ts: number;
@@ -108,6 +109,7 @@ export const riskCheckSchema = z.object({
 
 const domainEventSchema = z.object({
   id: uuidSchema,
+  dedupeKey: z.string().min(1).optional(),
   type: z.enum(domainEventTypes),
   data: z.unknown(),
   ts: timestampSchema,

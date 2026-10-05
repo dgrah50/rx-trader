@@ -10,7 +10,7 @@ interface AuditLoggerOptions {
   logger: LoggerLike;
 }
 
-export interface AuditLogger {
+interface AuditLogger {
   log: (event: string, payload: Record<string, unknown>) => void;
   close: () => void;
 }

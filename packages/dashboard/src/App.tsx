@@ -78,14 +78,8 @@ export const App = () => {
     statusData?.runtime.strategies?.forEach((strategy) => {
       map.set(strategy.tradeSymbol, venueLabel(strategy.primaryFeed));
     });
-    if (statusData?.runtime.strategy) {
-      const primary = statusData.runtime.strategy;
-      if (!map.has(primary.tradeSymbol)) {
-        map.set(primary.tradeSymbol, venueLabel(primary.primaryFeed));
-      }
-    }
     return map;
-  }, [statusData?.runtime.strategies, statusData?.runtime.strategy]);
+  }, [statusData?.runtime.strategies]);
 
   const positionEntries = Object.entries(positions ?? {}) as Array<[string, PositionSnapshot]>;
 
@@ -135,8 +129,18 @@ export const App = () => {
         ts: order.ts,
         type: order.type,
         summary: {
-          symbol: typeof data.symbol === 'string' ? data.symbol : typeof meta.symbol === 'string' ? meta.symbol : '—',
-          side: typeof data.side === 'string' ? data.side : typeof meta.side === 'string' ? meta.side : '—',
+          symbol:
+            typeof data.symbol === 'string'
+              ? data.symbol
+              : typeof meta.symbol === 'string'
+                ? meta.symbol
+                : '—',
+          side:
+            typeof data.side === 'string'
+              ? data.side
+              : typeof meta.side === 'string'
+                ? meta.side
+                : '—',
           qty: numberOrNull(data.qty ?? meta.qty ?? meta.size),
           px: numberOrNull(data.px ?? meta.execRefPx ?? meta.px),
           strategyId: typeof meta.strategyId === 'string' ? meta.strategyId : null,
@@ -156,18 +160,14 @@ export const App = () => {
 
   const balanceRows = useMemo<Array<BalanceEntry>>(() => {
     if (!accountBalances?.balances) return [];
-    return Object.entries(accountBalances.balances)
-      .flatMap(([venue, assets]) =>
-        Object.values(assets ?? {}).map((entry) => ({ ...entry, venue })),
-      )
+    return Object.values(accountBalances.balances)
+      .flatMap((assets) => Object.values(assets ?? {}))
       .sort((a, b) => `${a.venue}-${a.asset}`.localeCompare(`${b.venue}-${b.asset}`));
   }, [accountBalances?.balances]);
 
   const marginRows = useMemo<MarginSummary[]>(() => {
     if (!accountMargin?.summaries) return [];
-    return Object.entries(accountMargin.summaries)
-      .map(([venue, summary]) => ({ ...summary, venue }))
-      .sort((a, b) => a.venue.localeCompare(b.venue));
+    return Object.values(accountMargin.summaries).sort((a, b) => a.venue.localeCompare(b.venue));
   }, [accountMargin?.summaries]);
 
   const marginSnapshot = useMemo(() => {
@@ -210,175 +210,203 @@ export const App = () => {
   return (
     <div className="flex h-screen w-full bg-background text-xs overflow-hidden">
       <div className="flex flex-col flex-1 overflow-hidden transition-all duration-300">
-      <div className="border-b p-2">
-        <StatusHeader
-          modeLabel={modeLabel}
-          modeIntent={modeIntent}
-          feedSummary={feedSummary}
-          feeds={feedHealth}
-          lastEventTs={statusData?.metrics.lastEventTs ?? null}
-          lastLogTs={statusData?.metrics.lastLogTs ?? null}
-          killSwitch={Boolean(statusData?.runtime.killSwitch)}
-          eventStreamStatus={eventStreamStatus}
-          logStreamStatus={logStreamStatus}
-          showWarning={showSseWarning}
-          onOpenControl={() => openInNewTab('/')}
-          onOpenMetrics={() => openInNewTab('/metrics')}
-          marginSnapshot={marginSnapshot}
-        />
-      </div>
+        <div className="border-b p-2">
+          <StatusHeader
+            modeLabel={modeLabel}
+            modeIntent={modeIntent}
+            feedSummary={feedSummary}
+            feeds={feedHealth}
+            lastEventTs={statusData?.metrics.lastEventTs ?? null}
+            lastLogTs={statusData?.metrics.lastLogTs ?? null}
+            killSwitch={Boolean(statusData?.runtime.killSwitch)}
+            eventStreamStatus={eventStreamStatus}
+            logStreamStatus={logStreamStatus}
+            showWarning={showSseWarning}
+            onOpenControl={() => openInNewTab('/')}
+            onOpenMetrics={() => openInNewTab('/metrics')}
+            marginSnapshot={marginSnapshot}
+          />
+        </div>
 
-      <div className="flex-1 overflow-hidden p-2">
-        <Tabs defaultValue="live" className="flex h-full flex-col">
-          <div className="flex items-center justify-between px-1 pb-2">
-            <TabsList className="h-7 bg-muted/20 p-0.5">
-              <TabsTrigger value="live" className="h-6 px-3 text-[10px]">Live Dashboard</TabsTrigger>
-              <TabsTrigger value="health" className="h-6 px-3 text-[10px]">System Health</TabsTrigger>
-              <TabsTrigger value="flow" className="h-6 px-3 text-[10px]">Strategy Flow</TabsTrigger>
-              <TabsTrigger value="backtest" className="h-6 px-3 text-[10px]">Backtesting</TabsTrigger>
-            </TabsList>
-          </div>
+        <div className="flex-1 overflow-hidden p-2">
+          <Tabs defaultValue="live" className="flex h-full flex-col">
+            <div className="flex items-center justify-between px-1 pb-2">
+              <TabsList className="h-7 bg-muted/20 p-0.5">
+                <TabsTrigger value="live" className="h-6 px-3 text-[10px]">
+                  Live Dashboard
+                </TabsTrigger>
+                <TabsTrigger value="health" className="h-6 px-3 text-[10px]">
+                  System Health
+                </TabsTrigger>
+                <TabsTrigger value="flow" className="h-6 px-3 text-[10px]">
+                  Strategy Flow
+                </TabsTrigger>
+                <TabsTrigger value="backtest" className="h-6 px-3 text-[10px]">
+                  Backtesting
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-          <TabsContent value="live" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden">
-            <div className="flex h-full gap-2">
-              <div className="flex flex-col gap-2 w-[320px] shrink-0 overflow-hidden">
-                <div className="flex-1 overflow-y-auto">
-                  <StrategyMixerCard
-                    rows={strategyRows}
-                    selectedStrategyId={selectedStrategyId}
-                    onSelect={handleStrategySelect}
-                    options={strategyOptions}
-                    aggregatedMetrics={aggregatedMetrics}
-                    selectedStrategy={selectedStrategy}
-                    formatAgo={formatAgo}
-                  />
-                </div>
-                <div className="shrink-0">
-                  <GatewayCard
-                    gatewayUrl={gatewayUrl}
-                    onGatewayChange={setGatewayUrl}
-                    onCopy={() => navigator.clipboard.writeText(gatewayUrl)}
-                    onOpenControl={() => openInNewTab('/')}
-                    onOpenMetrics={() => openInNewTab('/metrics')}
-                  />
-                </div>
-              </div>
-
-              <div className="flex-1 grid grid-cols-12 gap-2 overflow-hidden">
-
-              <div className="col-span-6 flex flex-col gap-2 overflow-hidden">
-                <div className="shrink-0">
-                  <PortfolioOverviewCard
-                    nav={statusNav}
-                    netRealized={statusNetRealized}
-                    grossRealized={statusGrossRealized}
-                    unrealized={statusUnrealized}
-                    feesPaid={statusFees}
-                    positions={positionEntries}
-                    balances={balanceRows}
-                    formatNumber={formatNumber}
-                  />
-                </div>
-                <div className="flex-1 overflow-y-auto">
-                  <PositionsCard
-                    rows={displayedPositions}
-                    totalSymbols={positionEntries.length}
-                    selectedStrategy={selectedStrategy}
-                    formatNumber={formatNumber}
-                  />
-                </div>
-                <div className="h-1/3 overflow-y-auto">
-                  <OrdersCard
-                    orders={displayedOrders}
-                    selectedStrategy={selectedStrategy}
-                    formatNumber={formatNumber}
-                  />
-                </div>
-              </div>
-
-              <div className="col-span-6 flex flex-col gap-2 overflow-hidden">
-                <div className="h-1/3 overflow-y-auto">
-                  <PnlTimelineCard history={pnlHistory} />
-                </div>
-                <div className="h-1/3 overflow-y-auto">
-                  <TradesCard
-                    openTrades={trades?.open ?? []}
-                    closedTrades={trades?.closed ?? []}
-                    formatNumber={formatNumber}
-                    formatAgo={formatAgo}
-                  />
-                </div>
-                <div className="flex-1 overflow-hidden flex flex-col gap-2">
+            <TabsContent
+              value="live"
+              className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden"
+            >
+              <div className="flex h-full gap-2">
+                <div className="flex flex-col gap-2 w-[320px] shrink-0 overflow-hidden">
                   <div className="flex-1 overflow-y-auto">
-                    <EventsLogsTabs
-                      events={recentDomainEvents ?? events.slice(0, 10)}
-                      logs={logs.slice(0, 10)}
+                    <StrategyMixerCard
+                      rows={strategyRows}
+                      selectedStrategyId={selectedStrategyId}
+                      onSelect={handleStrategySelect}
+                      options={strategyOptions}
+                      aggregatedMetrics={aggregatedMetrics}
+                      selectedStrategy={selectedStrategy}
+                      formatAgo={formatAgo}
                     />
                   </div>
                   <div className="shrink-0">
-                    <AccountBalancesCard
-                      balances={balanceRows}
-                      updated={accountBalances?.updated ?? null}
-                      balanceSync={balanceSync}
+                    <GatewayCard
+                      gatewayUrl={gatewayUrl}
+                      onGatewayChange={setGatewayUrl}
+                      onCopy={() => navigator.clipboard.writeText(gatewayUrl)}
+                      onOpenControl={() => openInNewTab('/')}
+                      onOpenMetrics={() => openInNewTab('/metrics')}
                     />
                   </div>
                 </div>
+
+                <div className="flex-1 grid grid-cols-12 gap-2 overflow-hidden">
+                  <div className="col-span-6 flex flex-col gap-2 overflow-hidden">
+                    <div className="shrink-0">
+                      <PortfolioOverviewCard
+                        nav={statusNav}
+                        netRealized={statusNetRealized}
+                        grossRealized={statusGrossRealized}
+                        unrealized={statusUnrealized}
+                        feesPaid={statusFees}
+                        positions={positionEntries}
+                        balances={balanceRows}
+                        formatNumber={formatNumber}
+                      />
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      <PositionsCard
+                        rows={displayedPositions}
+                        totalSymbols={positionEntries.length}
+                        selectedStrategy={selectedStrategy}
+                        formatNumber={formatNumber}
+                      />
+                    </div>
+                    <div className="h-1/3 overflow-y-auto">
+                      <OrdersCard
+                        orders={displayedOrders}
+                        selectedStrategy={selectedStrategy}
+                        formatNumber={formatNumber}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="col-span-6 flex flex-col gap-2 overflow-hidden">
+                    <div className="h-1/3 overflow-y-auto">
+                      <PnlTimelineCard history={pnlHistory} />
+                    </div>
+                    <div className="h-1/3 overflow-y-auto">
+                      <TradesCard
+                        openTrades={trades?.open ?? []}
+                        closedTrades={trades?.closed ?? []}
+                        formatNumber={formatNumber}
+                        formatAgo={formatAgo}
+                      />
+                    </div>
+                    <div className="flex-1 overflow-hidden flex flex-col gap-2">
+                      <div className="flex-1 overflow-y-auto">
+                        <EventsLogsTabs
+                          events={recentDomainEvents ?? events.slice(0, 10)}
+                          logs={logs.slice(0, 10)}
+                        />
+                      </div>
+                      <div className="shrink-0">
+                        <AccountBalancesCard
+                          balances={balanceRows}
+                          updated={accountBalances?.updated ?? null}
+                          balanceSync={balanceSync}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
-              </div>
-            </div>
-          </TabsContent>
+            </TabsContent>
 
-          <TabsContent value="health" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden p-2">
-            <StrategyHealthCard
-              strategies={statusData?.runtime.strategies ?? []}
-              feeds={statusData?.feeds ?? []}
-              formatNumber={formatNumber}
-              formatAgo={formatAgo}
-            />
-          </TabsContent>
-
-          <TabsContent value="backtest" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden p-1">
-            <BacktestPanel
-              artifact={publishedArtifact}
-              onArtifactChange={setArtifact}
-              history={artifactHistory}
-            />
-          </TabsContent>
-
-          <TabsContent value="flow" className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden p-1">
-            <StrategyFlowTab strategies={statusData?.runtime.strategies ?? []} />
-          </TabsContent>
-        </Tabs>
-      </div>
-    </div>
-
-    {isSidebarOpen && (
-      <div className="w-[400px] border-l border-border bg-card/50 overflow-y-auto animate-in slide-in-from-right duration-300">
-        <div className="p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wider">Strategy Details</h2>
-            <button 
-              onClick={() => setIsSidebarOpen(false)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
+            <TabsContent
+              value="health"
+              className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden p-2"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-          </div>
-          <StrategyDetailsCard
-            selectedStrategy={selectedStrategy}
-            fallbackStrategy={statusData?.runtime.strategy ?? null}
-            persistence={gatewayPersistence}
-            options={strategyOptions}
-            onSelect={setSelectedStrategyId}
-            selectedStrategyId={selectedStrategyId}
-          />
+              <StrategyHealthCard
+                strategies={statusData?.runtime.strategies ?? []}
+                feeds={statusData?.feeds ?? []}
+                formatNumber={formatNumber}
+                formatAgo={formatAgo}
+              />
+            </TabsContent>
+
+            <TabsContent
+              value="backtest"
+              className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden p-1"
+            >
+              <BacktestPanel
+                artifact={publishedArtifact}
+                onArtifactChange={setArtifact}
+                history={artifactHistory}
+              />
+            </TabsContent>
+
+            <TabsContent
+              value="flow"
+              className="flex-1 overflow-hidden mt-0 data-[state=inactive]:hidden p-1"
+            >
+              <StrategyFlowTab strategies={statusData?.runtime.strategies ?? []} />
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
-    )}
-  </div>
+
+      {isSidebarOpen && (
+        <div className="w-[400px] border-l border-border bg-card/50 overflow-y-auto animate-in slide-in-from-right duration-300">
+          <div className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold uppercase tracking-wider">Strategy Details</h2>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <StrategyDetailsCard
+              selectedStrategy={selectedStrategy}
+              persistence={gatewayPersistence}
+              options={strategyOptions}
+              onSelect={setSelectedStrategyId}
+              selectedStrategyId={selectedStrategyId}
+            />
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

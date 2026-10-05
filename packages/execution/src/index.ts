@@ -8,6 +8,7 @@ import type {
   OrderCancelReq,
 } from '@rx-trader/core/domain';
 import { ExecutionVenue } from '@rx-trader/core/constants';
+import { deterministicUuid } from '@rx-trader/core/integrity';
 import { createHmac } from 'node:crypto';
 import type { Clock } from '@rx-trader/core/time';
 import { systemClock } from '@rx-trader/core/time';
@@ -85,21 +86,38 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
 
   protected ack(orderId: string, ts = this.clock.now()) {
     const payload: OrderAck = { id: orderId, t: ts, venue: this.id };
+    const dedupeKey = `order.ack:${this.id}:${orderId}`;
     this.events$.next({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'order.ack',
       ts,
       data: payload,
     });
   }
 
-  protected fill(order: OrderNew, overrides: Partial<OrderNew> = {}, ts = this.clock.now()) {
+  protected fill(
+    order: OrderNew,
+    overrides: Partial<OrderNew> & {
+      executionIndex?: number;
+      venueOrderId?: string;
+      venueTradeId?: string;
+    } = {},
+    ts = this.clock.now(),
+  ) {
+    const executionIdentity =
+      overrides.venueTradeId ?? `${order.id}:${overrides.executionIndex ?? 0}`;
+    const dedupeKey = `order.fill:${this.id}:${executionIdentity}`;
+    const fillId = deterministicUuid(`fill:${this.id}:${executionIdentity}`);
     this.events$.next({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'order.fill',
       ts,
       data: {
-        id: crypto.randomUUID(),
+        id: fillId,
+        venueTradeId: overrides.venueTradeId,
+        venueOrderId: overrides.venueOrderId,
         orderId: order.id,
         t: ts,
         symbol: overrides.symbol ?? order.symbol,
@@ -112,8 +130,10 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
 
   protected cancelEvent(orderId: string, ts = this.clock.now()) {
     const payload: OrderCancelReq = { id: orderId, t: ts };
+    const dedupeKey = `order.cancel:${this.id}:${orderId}`;
     this.events$.next({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'order.cancel',
       ts,
       data: payload,
@@ -122,8 +142,10 @@ abstract class BaseExecutionAdapter implements ExecutionAdapter {
 
   protected reject(orderId: string, reason: string, ts = this.clock.now()) {
     const payload: OrderReject = { id: orderId, t: ts, reason };
+    const dedupeKey = `order.reject:${this.id}:${orderId}`;
     this.events$.next({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'order.reject',
       ts,
       data: payload,
@@ -142,54 +164,36 @@ export class PaperExecutionAdapter extends BaseExecutionAdapter {
     super(id, clock);
   }
 
-  /**
-   * Simulate realistic order execution with:
-   * - Roundtrip latency (jittered delay)
-   * - Price slippage for market orders
-   * - Fill price variation for limit orders
-  */
+  /** Synthetic paper fills; this does not model an exchange order book. */
   async submit(order: OrderNew) {
-    // Simulate network roundtrip to exchange (30-150ms typical for Binance)
     const baseLatencyMs = 50;
-    const jitterMs = Math.random() * 100; // 0-100ms jitter
+    const jitterMs = Math.random() * 100;
     const latencyMs = baseLatencyMs + jitterMs;
 
-    // Emit ACK after small delay
-    await delay(latencyMs * 0.3); // ACK comes back quickly
+    await delay(latencyMs * 0.3);
     this.ack(order.id, this.clock.now());
 
-    // Determine execution price with realistic slippage
     const metaPx = order.meta?.execRefPx;
     const refPrice = metaPx ?? order.px ?? 100;
 
     let fillPrice = refPrice;
 
     if (order.type === 'MKT') {
-      // Market orders: simulate slippage based on spread and urgency
-      // Typical Binance BTC spread: 0.01-0.05% (1-5 bps)
-      const spreadBps = 2 + Math.random() * 3; // 2-5 bps spread
-      const slippageBps = spreadBps * (0.5 + Math.random()); // Pay partial spread
+      const spreadBps = 2 + Math.random() * 3;
+      const slippageBps = spreadBps * (0.5 + Math.random());
       const slippagePct = slippageBps / 10000;
 
-      // BUY pays ask (higher), SELL receives bid (lower)
       fillPrice =
         order.side === 'BUY' ? refPrice * (1 + slippagePct) : refPrice * (1 - slippagePct);
     } else {
-      // Limit orders: small variation around limit price (maker fills)
-      // Simulate favorable fill due to price improvement
-      const improvementBps = Math.random() * 1; // 0-1 bps improvement
+      const improvementBps = Math.random();
       const improvementPct = improvementBps / 10000;
 
       fillPrice =
-        order.side === 'BUY'
-          ? refPrice * (1 - improvementPct) // Buy lower
-          : refPrice * (1 + improvementPct); // Sell higher
+        order.side === 'BUY' ? refPrice * (1 - improvementPct) : refPrice * (1 + improvementPct);
     }
 
-    // Wait for remaining latency before fill
     await delay(latencyMs * 0.7);
-
-    // Generate fill with simulated execution price
     this.fill(order, { px: fillPrice }, this.clock.now());
   }
 }
@@ -288,6 +292,7 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
         return res;
       });
       const data = (await response.json()) as {
+        orderId?: number | string;
         transactTime?: number;
         status?: string;
         price?: string | number;
@@ -298,7 +303,16 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
       this.ack(order.id, ts);
       if (data.status === 'FILLED') {
         const px = Number(data.price) || order.px || Number(data.avgPrice) || 0;
-        this.fill(order, { px }, ts);
+        const venueOrderId = data.orderId === undefined ? undefined : String(data.orderId);
+        this.fill(
+          order,
+          {
+            px,
+            venueOrderId,
+            venueTradeId: venueOrderId ? `order:${venueOrderId}:aggregate` : undefined,
+          },
+          ts,
+        );
       }
     } catch (error) {
       const reason =
@@ -338,80 +352,5 @@ export class BinanceRestGateway extends BaseExecutionAdapter {
       }
     });
     this.cancelEvent(orderId);
-  }
-}
-
-export interface HyperliquidRestGatewayConfig {
-  apiKey: string;
-  apiSecret: string;
-  baseUrl?: string;
-}
-
-export class HyperliquidRestGateway extends BaseExecutionAdapter {
-  private readonly baseUrl: string;
-
-  constructor(
-    private readonly config: HyperliquidRestGatewayConfig,
-    clock?: Clock,
-  ) {
-    super(ExecutionVenue.Hyperliquid, clock);
-    this.baseUrl = config.baseUrl ?? 'https://api.hyperliquid.xyz';
-  }
-
-  private async signedFetch(path: string, body: Record<string, unknown>) {
-    const payload = JSON.stringify(body);
-    const signature = createHmac('sha256', this.config.apiSecret).update(payload).digest('hex');
-    return withRetry(async () => {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': this.config.apiKey,
-          'x-signature': signature,
-        },
-        body: payload,
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        const reason = text || res.statusText;
-        if (shouldRetryStatus(res.status)) {
-          throw new ExecutionRetryError(`Hyperliquid retryable error: ${reason}`, true);
-        }
-        throw new ExecutionRetryError(reason, false);
-      }
-      return res;
-    });
-  }
-
-  async submit(order: OrderNew) {
-    try {
-      const response = await this.signedFetch('/orders', {
-        symbol: order.symbol,
-        side: order.side,
-        size: order.qty,
-        type: order.type === 'LMT' ? 'limit' : 'market',
-        price: order.px ?? null,
-        tif: order.tif,
-      });
-      const data = (await response.json()) as {
-        timestamp?: number;
-        status?: string;
-        filledSize?: number | string | null;
-        price?: string | number;
-      };
-      const ts = data.timestamp ?? this.clock.now();
-      this.ack(order.id, ts);
-      if (data.status === 'filled' || data.filledSize != null) {
-        const px = Number(data.price) || order.px || 0;
-        this.fill(order, { px }, ts);
-      }
-    } catch (error) {
-      const reason =
-        error instanceof ExecutionRetryError
-          ? error.message
-          : ((error as Error)?.message ?? 'Submit failed');
-      this.reject(order.id, reason);
-      throw error;
-    }
   }
 }

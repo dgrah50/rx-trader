@@ -72,6 +72,9 @@ describe('createPersistenceManager', () => {
     });
 
     const event = sampleEvent();
+    event.dedupeKey = `order.new:TEST:${(event.data as { id: string }).id}`;
+    const streamed: string[] = [];
+    store.stream$.subscribe((committed) => streamed.push(committed.id));
     manager.enqueue(event);
 
     let persisted: DomainEvent[] = [];
@@ -81,8 +84,12 @@ describe('createPersistenceManager', () => {
     });
     expect(persisted.some((e) => e.id === event.id)).toBe(true);
 
-    manager.shutdown();
-    await sleep(50);
+    manager.enqueue({ ...event, id: crypto.randomUUID() });
+    await manager.shutdown();
+    persisted = await store.read();
+    expect(persisted).toHaveLength(1);
+    expect(streamed).toEqual([event.id]);
+
     await store.close();
     await fs.rm(tempDir, { recursive: true, force: true });
   }, 20000);

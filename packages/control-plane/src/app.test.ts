@@ -5,6 +5,7 @@ import { InMemoryEventStore } from '@rx-trader/event-store';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hashCanonical, sha256Hex } from '@rx-trader/core/integrity';
 
 const orderPayload = {
   id: crypto.randomUUID(),
@@ -14,21 +15,60 @@ const orderPayload = {
   qty: 1,
   type: 'MKT',
   tif: 'DAY',
-  account: 'TEST'
+  account: 'TEST',
 };
 
 const post = (path: string, body: unknown) =>
   new Request(`http://test${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
 
 const get = (path: string) => new Request(`http://test${path}`);
 const authedGet = (path: string, token: string) =>
   new Request(`http://test${path}`, {
-    headers: { authorization: `Bearer ${token}` }
+    headers: { authorization: `Bearer ${token}` },
   });
+
+const verifiedArtifact = (summary: Record<string, unknown>) => {
+  const events: unknown[] = [];
+  const positions = { positions: {} };
+  const pnl = {};
+  return {
+    summary,
+    events,
+    positions,
+    pnl,
+    navCurve: [],
+    stats: {},
+    clock: {},
+    integrity: {
+      version: 1,
+      status: 'verified',
+      fingerprints: {
+        datasetSha256: hashCanonical([]),
+        configSha256: hashCanonical({}),
+        eventsSha256: hashCanonical(events),
+        eventChainSha256: sha256Hex(''),
+        stateSha256: hashCanonical({ positions, pnl }),
+        replayStateSha256: hashCanonical({ positions, pnl }),
+        codeSha256: hashCanonical('test-code'),
+        codeCommit: 'test-commit',
+        worktreeDirty: false,
+      },
+      counts: {
+        events: 0,
+        uniqueEventIds: 0,
+        dedupeKeys: 0,
+        fills: 0,
+        uniqueFills: 0,
+        fillLedgerEntries: 0,
+      },
+      checks: [],
+    },
+  };
+};
 
 describe('gateway integration', () => {
   it('accepts venue orders and updates positions', async () => {
@@ -52,8 +92,8 @@ describe('gateway integration', () => {
         px: 101,
         qty: 1,
         side: 'BUY',
-        fee: 0.1
-      }
+        fee: 0.1,
+      },
     });
 
     await store.append({
@@ -74,8 +114,8 @@ describe('gateway integration', () => {
             netRealized: 0,
             grossRealized: 0,
             notional: 101,
-            pnl: 1
-          }
+            pnl: 1,
+          },
         },
         nav: 101,
         pnl: 1,
@@ -84,8 +124,8 @@ describe('gateway integration', () => {
         realized: 0,
         unrealized: 1,
         cash: 0,
-        feesPaid: 0
-      }
+        feesPaid: 0,
+      },
     });
 
     const positionsRes = await router(get('/positions'));
@@ -96,6 +136,20 @@ describe('gateway integration', () => {
     expect(tradesRes.status).toBe(200);
     const trades = await tradesRes.json();
     expect(Array.isArray(trades.open)).toBe(true);
+  });
+
+  it('rejects unsupported live Hyperliquid execution before accepting the order', async () => {
+    const config = loadConfig({ EVENT_STORE_DRIVER: 'memory', GATEWAY_PORT: '0' });
+    const store = new InMemoryEventStore();
+    const router = await createControlPlaneRouter(config, { store, runtimeMeta: { live: true } });
+
+    const response = await router(post('/orders/hyperliquid', orderPayload));
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({
+      error: 'Execution unavailable for venue hyperliquid',
+    });
+    expect(await store.read()).toEqual([]);
   });
 
   it('streams domain events over SSE', async () => {
@@ -174,10 +228,10 @@ describe('gateway integration', () => {
             netRealized: 50,
             grossRealized: 50,
             unrealized: 100,
-            notional: 6_100
-          }
-        }
-      }
+            notional: 6_100,
+          },
+        },
+      },
     });
     const router = await createControlPlaneRouter(config, { store });
 
@@ -194,9 +248,9 @@ describe('gateway integration', () => {
     const router = await createControlPlaneRouter(config, { store });
 
     const artifact = {
+      ...verifiedArtifact({ nav: 100_000, pnl: 250, trades: 12 }),
       id: 'demo-artifact',
-      summary: { nav: 100_000, pnl: 250, trades: 12 },
-      createdAt: '2025-11-09T00:00:00.000Z'
+      createdAt: '2025-11-09T00:00:00.000Z',
     };
 
     const postRes = await router(post('/backtest/artifacts', artifact));
@@ -217,14 +271,10 @@ describe('gateway integration', () => {
     const store = new InMemoryEventStore();
     const router = await createControlPlaneRouter(config, { store });
 
-    const first = {
-      summary: { symbol: 'BTCUSDT', nav: 101_000, maxDrawdown: 500 },
-      stats: { nav: { sharpe: 1 }, wallRuntimeMs: 1 }
-    };
-    const second = {
-      summary: { symbol: 'ETHUSDT', nav: 202_000, maxDrawdown: 200 },
-      stats: { nav: { sharpe: 2 }, wallRuntimeMs: 2 }
-    };
+    const first = verifiedArtifact({ symbol: 'BTCUSDT', nav: 101_000, maxDrawdown: 500 });
+    first.stats = { nav: { sharpe: 1 }, wallRuntimeMs: 1 };
+    const second = verifiedArtifact({ symbol: 'ETHUSDT', nav: 202_000, maxDrawdown: 200 });
+    second.stats = { nav: { sharpe: 2 }, wallRuntimeMs: 2 };
 
     await router(post('/backtest/artifacts', first));
     await new Promise((resolve) => setTimeout(resolve, 2));
@@ -239,6 +289,16 @@ describe('gateway integration', () => {
     const fullRes = await router(get('/backtest/artifacts/history?limit=10'));
     const fullHistory = (await fullRes.json()) as Array<{ summary?: { symbol?: string } }>;
     expect(fullHistory.map((entry) => entry.summary?.symbol)).toEqual(['ETHUSDT', 'BTCUSDT']);
+  });
+
+  it('rejects a backtest artifact whose proof does not match its state', async () => {
+    const config = loadConfig({ EVENT_STORE_DRIVER: 'memory', GATEWAY_PORT: '0' });
+    const router = await createControlPlaneRouter(config, { store: new InMemoryEventStore() });
+    const artifact = verifiedArtifact({ symbol: 'BTCUSDT' });
+    artifact.integrity.fingerprints.stateSha256 = '0'.repeat(64);
+    const response = await router(post('/backtest/artifacts', artifact));
+    expect(response.status).toBe(422);
+    expect((await response.json()).integrityFailures).toContain('state fingerprint mismatch');
   });
 
   it('returns recent orders', async () => {
@@ -274,6 +334,8 @@ describe('gateway integration', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.runtime.live).toBe(true);
+    expect(Array.isArray(body.runtime.strategies)).toBe(true);
+    expect(body.runtime).not.toHaveProperty('strategy');
     expect(body.app.env).toBe(config.app.env);
     expect(Array.isArray(body.feeds)).toBe(true);
   });
@@ -282,7 +344,7 @@ describe('gateway integration', () => {
     const config = loadConfig({
       EVENT_STORE_DRIVER: 'memory',
       GATEWAY_PORT: '0',
-      CONTROL_PLANE_TOKEN: 'secret'
+      CONTROL_PLANE_TOKEN: 'secret',
     });
     const router = await createControlPlaneRouter(config);
 
@@ -299,7 +361,7 @@ describe('gateway integration', () => {
       GATEWAY_PORT: '0',
       CONTROL_PLANE_TOKEN: 'token',
       CONTROL_PLANE_RATE_WINDOW_MS: '1000',
-      CONTROL_PLANE_RATE_MAX: '1'
+      CONTROL_PLANE_RATE_MAX: '1',
     });
     const router = await createControlPlaneRouter(config);
 
@@ -317,7 +379,7 @@ describe('gateway integration', () => {
     const config = loadConfig({
       EVENT_STORE_DRIVER: 'memory',
       GATEWAY_PORT: '0',
-      DASHBOARD_DIST_DIR: dir
+      DASHBOARD_DIST_DIR: dir,
     });
     const router = await createControlPlaneRouter(config);
 

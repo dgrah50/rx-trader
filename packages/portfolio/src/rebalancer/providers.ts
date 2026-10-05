@@ -26,13 +26,13 @@ export class MockTransferProvider implements TransferProvider {
     }
     return {
       amount: transfer.amount,
-      metadata: { mode: this.id }
+      metadata: { mode: this.id },
     };
   }
 }
 
 interface TransferProviderFactoryInput {
-  mode: 'manual' | 'mock' | 'binance' | 'hyperliquid';
+  mode: 'manual' | 'mock';
   live: boolean;
   logger: LoggerInstance;
 }
@@ -40,32 +40,19 @@ interface TransferProviderFactoryInput {
 export const createTransferProviders = ({
   mode,
   live,
-  logger
+  logger,
 }: TransferProviderFactoryInput): TransferProvider[] => {
   switch (mode) {
     case 'mock':
       if (live) {
         logger.warn(
           { component: 'rebalancer', mode },
-          'Mock transfer provider disabled in live mode; falling back to manual approvals'
+          'Mock transfer provider disabled in live mode; falling back to manual approvals',
         );
         return [];
       }
       return [new MockTransferProvider()];
     case 'manual':
-      return [];
-    case 'binance':
-    case 'hyperliquid':
-      logger.warn(
-        { component: 'rebalancer', mode },
-        'Transfer provider not implemented yet; manual approval required'
-      );
-      return [];
-    default:
-      logger.warn(
-        { component: 'rebalancer', mode },
-        'Unknown transfer provider mode; manual approval required'
-      );
       return [];
   }
 };

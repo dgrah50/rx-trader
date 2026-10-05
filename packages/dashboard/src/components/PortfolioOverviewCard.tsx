@@ -10,7 +10,7 @@ interface PortfolioOverviewProps {
   unrealized: number | null | undefined;
   feesPaid: number | null | undefined;
   positions: Array<[string, PositionSnapshot]>;
-  balances: Array<BalanceEntry & { venue: string }>;
+  balances: BalanceEntry[];
   formatNumber: (value: number | null | undefined, precision?: number) => string;
 }
 

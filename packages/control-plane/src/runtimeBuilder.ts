@@ -1,14 +1,25 @@
-import { loadConfig, type EnvOverrides, type StrategyDefinition, type ExecutionPolicyConfig } from '@rx-trader/config';
+import {
+  loadConfig,
+  type EnvOverrides,
+  type StrategyDefinition,
+  type ExecutionPolicyConfig,
+} from '@rx-trader/config';
 import { createLogger, createMetrics } from '@rx-trader/observability';
-import { createEventStore, createPersistenceManager, persistenceWorkerUrl } from '@rx-trader/event-store';
+import {
+  createEventStore,
+  createPersistenceManager,
+  persistenceWorkerUrl,
+  type EventStore,
+} from '@rx-trader/event-store';
 import {
   createFeedManager,
   createStrategy$,
   createRiskStreams,
   createExecutionManager,
-  createStrategyOrchestrator
+  createStrategyOrchestrator,
 } from '@rx-trader/pipeline';
-import { FeedType } from '@rx-trader/core/constants';
+import type { FeedType } from '@rx-trader/core/constants';
+import { detectExecutionVenue, splitSymbolAssets } from '@rx-trader/core/instruments';
 import { createMarketStructureStore, MarketStructureRepository } from '@rx-trader/market-structure';
 import type { Metrics } from '@rx-trader/observability/metrics';
 import { createIntentBuilder } from '@rx-trader/strategies';
@@ -19,7 +30,7 @@ import type { AccountStateHandle } from '@rx-trader/portfolio';
 import type {
   InstrumentMetadata,
   RuntimeStrategyConfig,
-  StrategyRuntime
+  StrategyRuntime,
 } from '@rx-trader/pipeline';
 import { createQuoteReserveGuard, createMarketExposureGuard } from '@rx-trader/risk';
 import { resolveStrategyMarginConfig } from './marginConfig';
@@ -31,17 +42,8 @@ import { EventBus } from '@rx-trader/core';
 import type { StartEngineOptions, RuntimeDependencies } from './runtimeTypes';
 
 const feedTypeToExchange = (feed: FeedType): string | null => {
-  switch (feed) {
-    case FeedType.Binance:
-      return 'binance';
-    case FeedType.Hyperliquid:
-      return 'hyperliquid';
-    default:
-      return null;
-  }
+  return detectExecutionVenue(feed) ?? null;
 };
-
-type EventStoreInstance = Awaited<ReturnType<typeof createEventStore>>;
 
 type QuoteReserveGuardHandle = AccountExposureGuard & {
   reserveBase?: (orderId: string, qty: number) => void;
@@ -50,7 +52,7 @@ type QuoteReserveGuardHandle = AccountExposureGuard & {
 
 export interface RuntimeBuilderResult {
   config: ReturnType<typeof loadConfig>;
-  store: EventStoreInstance;
+  store: EventStore;
   metrics: Metrics;
   feedManager: ReturnType<typeof createFeedManager>;
   persistence: ReturnType<typeof createPersistenceManager>;
@@ -73,7 +75,7 @@ export type { RuntimeDependencies } from './runtimeTypes';
 
 export const buildRuntime = async (
   options: StartEngineOptions = {},
-  deps: RuntimeDependencies = {}
+  deps: RuntimeDependencies = {},
 ): Promise<RuntimeBuilderResult> => {
   const live = options.live ?? false;
   const config = loadConfig(options.configOverrides as EnvOverrides | undefined);
@@ -91,38 +93,24 @@ export const buildRuntime = async (
   const defaultFees = {
     makerBps: config.execution.policy.makerFeeBps,
     takerBps: config.execution.policy.takerFeeBps,
-    source: 'default'
+    source: 'default',
   };
 
-  const resolveFees = async (
-    exchangeCode: string | null,
-    symbol: string,
-    productType: string
-  ) => {
+  const resolveFees = async (exchangeCode: string | null, symbol: string, productType: string) => {
     if (!exchangeCode || exchangeCode === 'paper') {
       return defaultFees;
     }
-    try {
-      const schedule =
-        (await marketRepository.getFeeSchedule(exchangeCode, symbol, productType)) ??
-        (await marketRepository.getFeeSchedule(exchangeCode, '*', productType));
-      if (schedule) {
-        return {
-          makerBps: schedule.makerBps,
-          takerBps: schedule.takerBps,
-          source: schedule.source ?? 'repository'
-        };
-      }
-    } catch (error) {
-      logger.warn(
-        { exchange: exchangeCode, symbol, productType, err: (error as Error).message },
-        'Fee lookup failed, falling back to defaults'
-      );
-      return defaultFees;
+    const schedule = await marketRepository.getFeeSchedule(exchangeCode, symbol, productType);
+    if (schedule) {
+      return {
+        makerBps: schedule.makerBps,
+        takerBps: schedule.takerBps,
+        source: schedule.source ?? 'repository',
+      };
     }
     logger.warn(
       { exchange: exchangeCode, symbol, productType },
-      'Fee schedule missing in market-structure DB; falling back to execution defaults'
+      'Fee schedule missing in market-structure DB; falling back to execution defaults',
     );
     return defaultFees;
   };
@@ -136,7 +124,7 @@ export const buildRuntime = async (
     metrics,
     queueCapacity: config.persistence.queueCapacity,
     queueHighWatermarkRatio: 0.85,
-    queueSampleIntervalMs: 1000
+    queueSampleIntervalMs: 1000,
   });
   const accountState = await createAccountState(store);
 
@@ -145,17 +133,19 @@ export const buildRuntime = async (
     marketRepository,
     logger,
     risk,
-    resolveFees
+    resolveFees,
   );
 
   const runtimeStrategies = runtimeStrategiesBase.map((strategy) => ({
     ...strategy,
-    margin: resolveStrategyMarginConfig(strategy.definition, config, strategy.contractType)
+    margin: resolveStrategyMarginConfig(strategy.definition, config, strategy.contractType),
   }));
 
   const primaryStrategy = selectPrimaryStrategy(runtimeStrategies);
   const instrumentVenue = feedTypeToExchange(primaryStrategy.definition.primaryFeed) ?? 'paper';
-  const primaryMargin = primaryStrategy.margin ?? resolveStrategyMarginConfig(primaryStrategy.definition, config, primaryStrategy.contractType);
+  const primaryMargin =
+    primaryStrategy.margin ??
+    resolveStrategyMarginConfig(primaryStrategy.definition, config, primaryStrategy.contractType);
 
   const accountGuard =
     accountState && primaryStrategy.baseAsset && primaryStrategy.quoteAsset
@@ -163,7 +153,7 @@ export const buildRuntime = async (
           venue: instrumentVenue,
           baseAsset: primaryStrategy.baseAsset,
           quoteAsset: primaryStrategy.quoteAsset,
-          getBalance: (venue: string, asset: string) => accountState.getBalance(venue, asset)
+          getBalance: (venue: string, asset: string) => accountState.getBalance(venue, asset),
         })
       : undefined;
 
@@ -186,7 +176,7 @@ export const buildRuntime = async (
     createIntentBuilder: intentBuilderFactory,
     metrics,
     onFeedTick: () => metrics.ticksIngested.inc(),
-    reconcile$: executionRejects$
+    reconcile$: executionRejects$,
   });
 
   const exitIntentSink = new Subject<OrderNew>();
@@ -196,10 +186,17 @@ export const buildRuntime = async (
   const marketGuard = createMarketExposureGuard({
     productType: primaryMargin.productType,
     venue: instrumentVenue,
-    baseAsset: primaryStrategy.baseAsset ?? inferBaseQuote(primaryStrategy.definition.tradeSymbol)?.base ?? 'BASE',
-    quoteAsset: primaryStrategy.quoteAsset ?? inferBaseQuote(primaryStrategy.definition.tradeSymbol)?.quote ?? 'USD',
+    baseAsset:
+      primaryStrategy.baseAsset ??
+      splitSymbolAssets(primaryStrategy.definition.tradeSymbol)?.base ??
+      'BASE',
+    quoteAsset:
+      primaryStrategy.quoteAsset ??
+      splitSymbolAssets(primaryStrategy.definition.tradeSymbol)?.quote ??
+      'USD',
     leverageCap: primaryMargin.leverageCap,
-    getAvailable: (venue: string, asset: string) => accountState.getBalance(venue, asset)?.available ?? 0
+    getAvailable: (venue: string, asset: string) =>
+      accountState.getBalance(venue, asset)?.available ?? 0,
   });
 
   const riskStreams = createRiskStreams(
@@ -208,12 +205,12 @@ export const buildRuntime = async (
       notional: risk.notional,
       maxPosition: risk.maxPosition,
       priceBands: risk.priceBands,
-      throttle: risk.throttle
+      throttle: risk.throttle,
     },
     boundClock,
     accountGuard,
     primaryMargin.mode === 'cash' ? undefined : marketGuard,
-    executionRejects$
+    executionRejects$,
   );
 
   const executionFactory = deps.createExecutionManager ?? createExecutionManager;
@@ -225,7 +222,7 @@ export const buildRuntime = async (
     clock,
     metrics,
     logger,
-    feeDefaults: executionFeeDefaults
+    feeDefaults: executionFeeDefaults,
   });
 
   return {
@@ -244,7 +241,7 @@ export const buildRuntime = async (
       venue: instrumentVenue,
       baseAsset: primaryStrategy.baseAsset,
       quoteAsset: primaryStrategy.quoteAsset,
-      contractType: primaryStrategy.contractType
+      contractType: primaryStrategy.contractType,
     },
     strategies: runtimeStrategies,
     strategyRuntimes: orchestrator.runtimes,
@@ -252,7 +249,7 @@ export const buildRuntime = async (
     marginGuard: primaryMargin.mode === 'cash' ? undefined : marketGuard,
     exitIntentSink,
     eventBus,
-    reconcile$: executionRejects$
+    reconcile$: executionRejects$,
   };
 };
 
@@ -261,11 +258,15 @@ const resolveStrategies = async (
   marketRepository: MarketStructureRepository,
   logger: ReturnType<typeof createLogger>,
   risk: ReturnType<typeof loadConfig>['risk'],
-  resolveFees: (exchangeCode: string | null, symbol: string, productType: string) => Promise<{
+  resolveFees: (
+    exchangeCode: string | null,
+    symbol: string,
+    productType: string,
+  ) => Promise<{
     makerBps: number;
     takerBps: number;
     source?: string;
-  }>
+  }>,
 ): Promise<RuntimeStrategyConfig[]> => {
   const resolved = await Promise.all(
     definitions.map(async (definition) => {
@@ -278,11 +279,14 @@ const resolveStrategies = async (
       let lotSize: number | undefined;
 
       if (exchangeCode) {
-        const marketPair = await marketRepository.getExchangePair(exchangeCode, definition.tradeSymbol);
+        const marketPair = await marketRepository.getExchangePair(
+          exchangeCode,
+          definition.tradeSymbol,
+        );
         if (!marketPair) {
           logger.warn(
             { exchange: exchangeCode, symbol: definition.tradeSymbol },
-            'Market structure missing; using configured symbol as-is'
+            'Market structure missing; using configured symbol as-is',
           );
         } else {
           resolvedSymbol = marketPair.exchangePair.exchSymbol.toUpperCase();
@@ -293,7 +297,7 @@ const resolveStrategies = async (
       }
 
       if (!baseAsset || !quoteAsset) {
-        const inferred = inferBaseQuote(definition.tradeSymbol);
+        const inferred = splitSymbolAssets(definition.tradeSymbol);
         if (inferred) {
           baseAsset = baseAsset ?? inferred.base;
           quoteAsset = quoteAsset ?? inferred.quote;
@@ -312,9 +316,9 @@ const resolveStrategies = async (
         contractType,
         tickSize,
         lotSize,
-        fees
+        fees,
       } satisfies RuntimeStrategyConfig;
-    })
+    }),
   );
 
   return resolved;
@@ -327,22 +331,11 @@ const selectPrimaryStrategy = (strategies: RuntimeStrategyConfig[]): RuntimeStra
 const ensurePriceBand = (
   risk: ReturnType<typeof loadConfig>['risk'],
   originalSymbol: string,
-  resolvedSymbol: string
+  resolvedSymbol: string,
 ) => {
   const upperOriginal = originalSymbol.toUpperCase();
   const upperResolved = resolvedSymbol.toUpperCase();
   if (!risk.priceBands[upperResolved] && risk.priceBands[upperOriginal]) {
     risk.priceBands[upperResolved] = risk.priceBands[upperOriginal];
   }
-};
-
-const inferBaseQuote = (symbol: string): { base: string; quote: string } | null => {
-  const upper = symbol.toUpperCase();
-  const candidates = ['USDT', 'USD', 'USDC', 'BTC', 'ETH', 'BNB', 'EUR', 'JPY'];
-  for (const quote of candidates) {
-    if (upper.endsWith(quote) && upper.length > quote.length) {
-      return { base: upper.slice(0, -quote.length), quote };
-    }
-  }
-  return null;
 };

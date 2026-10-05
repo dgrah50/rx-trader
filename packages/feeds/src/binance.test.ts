@@ -6,11 +6,25 @@ import {
   type BinanceStream
 } from './binance';
 import type { WebSocketFactory, WebSocketLike } from './websocketFeed';
+import type { MarketTick } from '@rx-trader/core';
+
+type SocketEventArgs = {
+  open: [];
+  message: [data: RawData];
+  error: [error: Error];
+  close: [];
+};
+type SocketEvent = keyof SocketEventArgs;
 
 class MockWebSocket implements WebSocketLike {
   public readonly sent: string[] = [];
   public readyState = 1;
-  private listeners: Record<string, Array<(...args: any[]) => void>> = {};
+  private listeners: { [Event in SocketEvent]: Array<(...args: SocketEventArgs[Event]) => void> } = {
+    open: [],
+    message: [],
+    error: [],
+    close: []
+  };
 
   constructor(public readonly url: string) {}
 
@@ -22,16 +36,13 @@ class MockWebSocket implements WebSocketLike {
     this.emit('close');
   }
 
-  on(event: 'open' | 'message' | 'error' | 'close', listener: (...args: any[]) => void): this {
-    if (!this.listeners[event]) {
-      this.listeners[event] = [];
-    }
-    this.listeners[event]?.push(listener);
+  on<Event extends SocketEvent>(event: Event, listener: (...args: SocketEventArgs[Event]) => void): this {
+    this.listeners[event].push(listener);
     return this;
   }
 
-  emit(event: string, data?: RawData | Error) {
-    this.listeners[event]?.forEach((listener) => listener(data));
+  emit<Event extends SocketEvent>(event: Event, ...args: SocketEventArgs[Event]) {
+    this.listeners[event].forEach((listener) => listener(...args));
   }
 }
 
@@ -55,7 +66,7 @@ describe('BinanceFeedAdapter', () => {
     const stream: BinanceStream = 'bookTicker';
     const config: BinanceFeedConfig = { symbol: 'BTCUSDT', stream, webSocketFactory: factory };
     const adapter = new BinanceFeedAdapter(config);
-    const ticks: any[] = [];
+    const ticks: MarketTick[] = [];
     adapter.feed$.subscribe((tick) => ticks.push(tick));
 
     adapter.connect();
@@ -72,5 +83,22 @@ describe('BinanceFeedAdapter', () => {
       askSz: 2.5,
       t: mockMessage.E
     });
+  });
+
+  it('ignores malformed exchange payloads instead of casting them', () => {
+    const socket = new MockWebSocket('ws://test');
+    const adapter = new BinanceFeedAdapter({
+      symbol: 'BTCUSDT',
+      webSocketFactory: createFactory(socket)
+    });
+    const ticks: MarketTick[] = [];
+    adapter.feed$.subscribe((tick) => ticks.push(tick));
+
+    adapter.connect();
+    socket.emit('open');
+    socket.emit('message', Buffer.from(JSON.stringify({ b: {}, a: '101' })));
+    socket.emit('message', Buffer.from(JSON.stringify({ data: { b: '100' } })));
+
+    expect(ticks).toEqual([]);
   });
 });

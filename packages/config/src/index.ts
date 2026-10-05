@@ -8,7 +8,7 @@ import { safeParse } from '@rx-trader/core/validation';
 import { exitConfigSchema, type ExitConfig } from './strategy-exits.schema';
 export type { ExitConfig } from './strategy-exits.schema';
 export { exitConfigSchema } from './strategy-exits.schema';
-import type { RebalanceTarget } from '@rx-trader/portfolio/rebalancer/types';
+import type { RiskLimits } from '@rx-trader/risk';
 import { DEFAULT_STRATEGIES_JSON } from './defaultStrategies';
 
 const DEFAULT_CONFIG_FILENAME = 'rx.config.json';
@@ -42,8 +42,6 @@ export const envSchema = z.object({
   BINANCE_API_KEY: z.string().optional(),
   BINANCE_API_SECRET: z.string().optional(),
   BINANCE_API_BASE: z.string().url().default('https://api.binance.com'),
-  HYPERLIQUID_API_KEY: z.string().optional(),
-  HYPERLIQUID_API_SECRET: z.string().optional(),
   HYPERLIQUID_API_BASE: z.string().url().default('https://api.hyperliquid.xyz'),
   HYPERLIQUID_WALLET_ADDRESS: z.string().optional(),
   HYPERLIQUID_SUBACCOUNT: z.coerce.number().optional(),
@@ -94,7 +92,7 @@ export const envSchema = z.object({
   REBALANCER_TARGETS: z.string().default('[]'),
   REBALANCER_INTERVAL_MS: z.coerce.number().default(300_000),
   REBALANCER_AUTO_EXECUTE: booleanEnv.default(false),
-  REBALANCER_EXECUTOR_MODE: z.enum(['manual', 'mock', 'binance', 'hyperliquid']).default('manual'),
+  REBALANCER_EXECUTOR_MODE: z.enum(['manual', 'mock']).default('manual'),
 });
 
 export type EnvOverrides = Partial<Record<keyof z.infer<typeof envSchema>, string>>;
@@ -147,7 +145,7 @@ interface JsonOverridesResult {
 }
 
 const loadJsonConfigOverrides = (): JsonOverridesResult => {
-  const explicitPath = process.env.RX_CONFIG_PATH ?? process.env.RX_CONFIG;
+  const explicitPath = process.env.RX_CONFIG_PATH;
   if (explicitPath) {
     const resolved = path.resolve(explicitPath);
     if (!fs.existsSync(resolved)) {
@@ -225,126 +223,115 @@ const mapEnvToConfig = (env: z.infer<typeof envSchema>) => {
 
   return {
     app: {
-    env: env.NODE_ENV,
-    name: env.APP_NAME,
-    version: env.VERSION,
-  },
-  gateway: {
-    port: env.GATEWAY_PORT,
-  },
-  orchestrator: {
-    port: env.ORCHESTRATOR_PORT,
-  },
-  persistence: {
-    pgUrl: env.PG_URL,
-    sqlitePath: env.SQLITE_PATH,
-    driver: env.EVENT_STORE_DRIVER,
-    queueCapacity: env.PERSIST_QUEUE_CAPACITY,
-  },
-  marketStructure: {
-    sqlitePath: env.MARKET_STRUCTURE_SQLITE_PATH,
-  },
-  observability: {
-    otlpUrl: env.OTLP_URL,
-    metricsPort: env.PROMETHEUS_PORT,
-  },
-  execution: {
-    account: env.ACCOUNT_ID,
-    policy: {
-      mode: env.INTENT_MODE,
-      defaultQty: env.INTENT_DEFAULT_QTY,
-      limitOffsetBps: env.INTENT_LIMIT_OFFSET_BPS,
-      minEdgeBps: env.INTENT_MIN_EDGE_BPS,
-      makerFeeBps: env.MAKER_FEE_BPS,
-      takerFeeBps: env.TAKER_FEE_BPS,
-      tif: env.INTENT_TIF,
-      notionalUsd: env.INTENT_NOTIONAL_USD,
-      takerSlipBps: env.INTENT_TAKER_SLIP_BPS,
-      adverseSelectionBps: env.INTENT_ADVERSE_SELECTION_BPS,
-      postOnly: env.INTENT_POST_ONLY,
-      reduceOnly: env.INTENT_REDUCE_ONLY,
-      cooldownMs: env.INTENT_COOLDOWN_MS,
-      dedupeWindowMs: env.INTENT_DEDUPE_WINDOW_MS,
-      makerTimeoutMs: env.INTENT_MAKER_TIMEOUT_MS,
-      repriceBps: env.INTENT_REPRICE_BPS,
+      env: env.NODE_ENV,
+      name: env.APP_NAME,
+      version: env.VERSION,
     },
-    reliability: {
-      retry: {
-        maxAttempts: env.EXEC_RETRY_MAX_ATTEMPTS,
-        baseDelayMs: env.EXEC_RETRY_BASE_DELAY_MS,
-        maxDelayMs: env.EXEC_RETRY_MAX_DELAY_MS,
-        jitter: env.EXEC_RETRY_JITTER,
+    gateway: {
+      port: env.GATEWAY_PORT,
+    },
+    orchestrator: {
+      port: env.ORCHESTRATOR_PORT,
+    },
+    persistence: {
+      pgUrl: env.PG_URL,
+      sqlitePath: env.SQLITE_PATH,
+      driver: env.EVENT_STORE_DRIVER,
+      queueCapacity: env.PERSIST_QUEUE_CAPACITY,
+    },
+    marketStructure: {
+      sqlitePath: env.MARKET_STRUCTURE_SQLITE_PATH,
+    },
+    observability: {
+      otlpUrl: env.OTLP_URL,
+      metricsPort: env.PROMETHEUS_PORT,
+    },
+    execution: {
+      account: env.ACCOUNT_ID,
+      policy: {
+        mode: env.INTENT_MODE,
+        defaultQty: env.INTENT_DEFAULT_QTY,
+        limitOffsetBps: env.INTENT_LIMIT_OFFSET_BPS,
+        minEdgeBps: env.INTENT_MIN_EDGE_BPS,
+        makerFeeBps: env.MAKER_FEE_BPS,
+        takerFeeBps: env.TAKER_FEE_BPS,
+        tif: env.INTENT_TIF,
+        notionalUsd: env.INTENT_NOTIONAL_USD,
+        takerSlipBps: env.INTENT_TAKER_SLIP_BPS,
+        adverseSelectionBps: env.INTENT_ADVERSE_SELECTION_BPS,
+        postOnly: env.INTENT_POST_ONLY,
+        reduceOnly: env.INTENT_REDUCE_ONLY,
+        cooldownMs: env.INTENT_COOLDOWN_MS,
+        dedupeWindowMs: env.INTENT_DEDUPE_WINDOW_MS,
+        makerTimeoutMs: env.INTENT_MAKER_TIMEOUT_MS,
+        repriceBps: env.INTENT_REPRICE_BPS,
       },
-      circuitBreaker: {
-        failureThreshold: env.EXEC_CB_FAILURE_THRESHOLD,
-        cooldownMs: env.EXEC_CB_COOLDOWN_MS,
-        halfOpenMaxSuccesses: env.EXEC_CB_HALF_OPEN_MAX_SUCCESSES,
+      reliability: {
+        retry: {
+          maxAttempts: env.EXEC_RETRY_MAX_ATTEMPTS,
+          baseDelayMs: env.EXEC_RETRY_BASE_DELAY_MS,
+          maxDelayMs: env.EXEC_RETRY_MAX_DELAY_MS,
+          jitter: env.EXEC_RETRY_JITTER,
+        },
+        circuitBreaker: {
+          failureThreshold: env.EXEC_CB_FAILURE_THRESHOLD,
+          cooldownMs: env.EXEC_CB_COOLDOWN_MS,
+          halfOpenMaxSuccesses: env.EXEC_CB_HALF_OPEN_MAX_SUCCESSES,
+        },
+        reconciliation: {
+          ackTimeoutMs: env.EXEC_RECON_ACK_TIMEOUT_MS,
+          fillTimeoutMs: env.EXEC_RECON_FILL_TIMEOUT_MS,
+          pollIntervalMs: env.EXEC_RECON_POLL_INTERVAL_MS,
+        },
       },
-      reconciliation: {
-        ackTimeoutMs: env.EXEC_RECON_ACK_TIMEOUT_MS,
-        fillTimeoutMs: env.EXEC_RECON_FILL_TIMEOUT_MS,
-        pollIntervalMs: env.EXEC_RECON_POLL_INTERVAL_MS,
+    },
+    controlPlane: {
+      authToken: env.CONTROL_PLANE_TOKEN,
+      rateLimit: {
+        windowMs: env.CONTROL_PLANE_RATE_WINDOW_MS,
+        max: env.CONTROL_PLANE_RATE_MAX,
+      },
+      dashboard: {
+        distDir: env.DASHBOARD_DIST_DIR,
       },
     },
-  },
-  controlPlane: {
-    authToken: env.CONTROL_PLANE_TOKEN,
-    rateLimit: {
-      windowMs: env.CONTROL_PLANE_RATE_WINDOW_MS,
-      max: env.CONTROL_PLANE_RATE_MAX,
+    accounting: {
+      balanceSyncIntervalMs: env.BALANCE_SYNC_INTERVAL_MS,
+      balanceSyncMaxDriftBps: env.BALANCE_SYNC_DRIFT_BPS,
+      balanceSyncMutatesLedger: env.BALANCE_SYNC_MUTATES_LEDGER,
+      seedDemoBalance: env.ACCOUNTING_DEMO_BALANCE,
     },
-    dashboard: {
-      distDir: env.DASHBOARD_DIST_DIR,
-    },
-  },
-  accounting: {
-    balanceSyncIntervalMs: env.BALANCE_SYNC_INTERVAL_MS,
-    balanceSyncMaxDriftBps: env.BALANCE_SYNC_DRIFT_BPS,
-    balanceSyncMutatesLedger: env.BALANCE_SYNC_MUTATES_LEDGER,
-    seedDemoBalance: env.ACCOUNTING_DEMO_BALANCE,
-  },
-  rebalancer: {
-    intervalMs: env.REBALANCER_INTERVAL_MS,
-    targets: parseRebalanceTargets(env.REBALANCER_TARGETS),
-    executor: {
-      auto: env.REBALANCER_AUTO_EXECUTE,
-      mode: env.REBALANCER_EXECUTOR_MODE,
-    },
-  } satisfies RebalancerConfig,
-  venues: {
-    binance:
-      env.BINANCE_API_KEY && env.BINANCE_API_SECRET
+    rebalancer: {
+      intervalMs: env.REBALANCER_INTERVAL_MS,
+      targets: parseRebalanceTargets(env.REBALANCER_TARGETS),
+      executor: {
+        auto: env.REBALANCER_AUTO_EXECUTE,
+        mode: env.REBALANCER_EXECUTOR_MODE,
+      },
+    } satisfies RebalancerConfig,
+    venues: {
+      binance:
+        env.BINANCE_API_KEY && env.BINANCE_API_SECRET
+          ? {
+              apiKey: env.BINANCE_API_KEY,
+              apiSecret: env.BINANCE_API_SECRET,
+              baseUrl: env.BINANCE_API_BASE,
+            }
+          : undefined,
+      hyperliquid: env.HYPERLIQUID_WALLET_ADDRESS
         ? {
-            apiKey: env.BINANCE_API_KEY,
-            apiSecret: env.BINANCE_API_SECRET,
-            baseUrl: env.BINANCE_API_BASE,
-          }
-        : undefined,
-    hyperliquid:
-      env.HYPERLIQUID_API_KEY && env.HYPERLIQUID_API_SECRET
-        ? {
-            apiKey: env.HYPERLIQUID_API_KEY,
-            apiSecret: env.HYPERLIQUID_API_SECRET,
             baseUrl: env.HYPERLIQUID_API_BASE,
             walletAddress: env.HYPERLIQUID_WALLET_ADDRESS,
             subaccount: env.HYPERLIQUID_SUBACCOUNT,
           }
-        : env.HYPERLIQUID_WALLET_ADDRESS
-          ? {
-              apiKey: undefined,
-              apiSecret: undefined,
-              baseUrl: env.HYPERLIQUID_API_BASE,
-              walletAddress: env.HYPERLIQUID_WALLET_ADDRESS,
-              subaccount: env.HYPERLIQUID_SUBACCOUNT,
-            }
-          : undefined,
-  },
-  margin: {
-    spot: {
-      enabled: env.SPOT_MARGIN_ENABLED,
-      leverageCap: env.SPOT_MARGIN_LEVERAGE,
+        : undefined,
     },
-  },
+    margin: {
+      spot: {
+        enabled: env.SPOT_MARGIN_ENABLED,
+        leverageCap: env.SPOT_MARGIN_LEVERAGE,
+      },
+    },
     strategies,
     risk,
   };
@@ -557,11 +544,15 @@ export interface StrategyConfig {
   exit: ExitConfig;
 }
 
-interface RiskConfig {
-  notional: number;
-  maxPosition: number;
-  priceBands: Record<string, { min: number; max: number }>;
-  throttle: { windowMs: number; maxCount: number };
+type RiskConfig = RiskLimits;
+
+export interface RebalanceTarget {
+  venue: string;
+  asset: string;
+  min?: number;
+  max?: number;
+  target?: number;
+  priority?: number;
 }
 
 interface RebalancerConfig {
@@ -569,7 +560,7 @@ interface RebalancerConfig {
   targets: RebalanceTarget[];
   executor: {
     auto: boolean;
-    mode: 'manual' | 'mock' | 'binance' | 'hyperliquid';
+    mode: 'manual' | 'mock';
   };
 }
 

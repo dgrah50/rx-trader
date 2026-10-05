@@ -44,4 +44,37 @@ describe('PostgresEventStore', () => {
     expect(events).toHaveLength(1);
     expect((events[0]?.data as any).bid).toBe(2);
   });
+
+  it('does not persist or publish duplicate economic keys', async () => {
+    const { store } = await createStore();
+    const streamed: string[] = [];
+    store.stream$.subscribe((event) => streamed.push(event.id));
+    const buildEvent = () => ({
+      id: crypto.randomUUID(),
+      dedupeKey: 'market.tick:SIM:1',
+      type: 'market.tick' as const,
+      data: { t: 1, symbol: 'SIM', bid: 1 },
+      ts: 1,
+    });
+    const first = buildEvent();
+    await store.append([first, buildEvent()]);
+    expect(await store.read()).toHaveLength(1);
+    expect(streamed).toEqual([first.id]);
+  });
+
+  it('publishes nothing when a transaction rolls back', async () => {
+    const { store } = await createStore();
+    const streamed: string[] = [];
+    store.stream$.subscribe((event) => streamed.push(event.id));
+    const valid = {
+      id: crypto.randomUUID(),
+      type: 'market.tick' as const,
+      data: { t: 1, symbol: 'SIM', bid: 1 },
+      ts: 1,
+    };
+    const invalid = { ...valid, id: crypto.randomUUID(), data: { ...valid.data, bid: 'bad' } };
+    await expect(store.append([valid, invalid as never])).rejects.toThrow();
+    expect(await store.read()).toHaveLength(0);
+    expect(streamed).toHaveLength(0);
+  });
 });

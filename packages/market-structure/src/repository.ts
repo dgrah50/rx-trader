@@ -8,7 +8,7 @@ import {
   feeScheduleTable,
   marketStructureSnapshotTable,
   type AssetClass,
-  type ContractType
+  type ContractType,
 } from './schema';
 import type { MarketStructureDatabase } from './db';
 import type { ExchangePair, Exchange, CurrencyPair } from './schema';
@@ -85,7 +85,7 @@ export class MarketStructureRepository {
         assetClass: entry.assetClass,
         decimals: entry.decimals ?? 0,
         displayName: entry.displayName,
-        metadata: entry.metadata ?? null
+        metadata: entry.metadata ?? null,
       })
       .onConflictDoUpdate({
         target: currencyTable.symbol,
@@ -93,8 +93,8 @@ export class MarketStructureRepository {
           assetClass: entry.assetClass,
           decimals: entry.decimals ?? 0,
           displayName: entry.displayName,
-          metadata: entry.metadata ?? null
-        }
+          metadata: entry.metadata ?? null,
+        },
       });
   }
 
@@ -115,7 +115,7 @@ export class MarketStructureRepository {
         quoteCcyId: quote,
         assetClass: entry.assetClass,
         contractType: entry.contractType,
-        metadata: entry.metadata ?? null
+        metadata: entry.metadata ?? null,
       })
       .onConflictDoUpdate({
         target: currencyPairTable.symbol,
@@ -124,8 +124,8 @@ export class MarketStructureRepository {
           quoteCcyId: quote,
           assetClass: entry.assetClass,
           contractType: entry.contractType,
-          metadata: entry.metadata ?? null
-        }
+          metadata: entry.metadata ?? null,
+        },
       });
   }
 
@@ -153,15 +153,15 @@ export class MarketStructureRepository {
         ccyId: currencyId,
         exchSymbol: entry.exchSymbol,
         status: entry.status ?? 'trading',
-        metadata: entry.metadata ?? null
+        metadata: entry.metadata ?? null,
       })
       .onConflictDoUpdate({
         target: [exchangeCurrencyTable.exchId, exchangeCurrencyTable.exchSymbol],
         set: {
           ccyId: currencyId,
           status: entry.status ?? 'trading',
-          metadata: entry.metadata ?? null
-        }
+          metadata: entry.metadata ?? null,
+        },
       });
   }
 
@@ -190,7 +190,7 @@ export class MarketStructureRepository {
         assetClass: entry.assetClass,
         contractType: entry.contractType,
         status: entry.status ?? 'trading',
-        metadata: entry.metadata ?? null
+        metadata: entry.metadata ?? null,
       })
       .onConflictDoUpdate({
         target: [exchangePairTable.exchId, exchangePairTable.exchSymbol],
@@ -206,8 +206,8 @@ export class MarketStructureRepository {
           assetClass: entry.assetClass,
           contractType: entry.contractType,
           status: entry.status ?? 'trading',
-          metadata: entry.metadata ?? null
-        }
+          metadata: entry.metadata ?? null,
+        },
       });
   }
 
@@ -217,14 +217,17 @@ export class MarketStructureRepository {
     }
   }
 
-  async getExchangePair(exchangeCode: string, exchSymbol: string): Promise<ExchangePairRecord | null> {
+  async getExchangePair(
+    exchangeCode: string,
+    exchSymbol: string,
+  ): Promise<ExchangePairRecord | null> {
     const result = await this.db
       .select()
       .from(exchangePairTable)
       .innerJoin(exchangeTable, eq(exchangePairTable.exchId, exchangeTable.id))
       .innerJoin(currencyPairTable, eq(exchangePairTable.ccyPairId, currencyPairTable.id))
       .where(
-        and(eq(exchangeTable.code, exchangeCode), eq(exchangePairTable.exchSymbol, exchSymbol))
+        and(eq(exchangeTable.code, exchangeCode), eq(exchangePairTable.exchSymbol, exchSymbol)),
       )
       .limit(1);
     const row = result[0] as ExchangePairRow | undefined;
@@ -232,7 +235,7 @@ export class MarketStructureRepository {
     return {
       exchangePair: row.exch_ccy_pair,
       exchange: row.exch,
-      pair: row.ccy_pair
+      pair: row.ccy_pair,
     };
   }
 
@@ -241,7 +244,7 @@ export class MarketStructureRepository {
     await this.db.insert(marketStructureSnapshotTable).values({
       exchId: exchangeId,
       payload,
-      snapshotHash: hash
+      snapshotHash: hash,
     });
   }
 
@@ -265,7 +268,7 @@ export class MarketStructureRepository {
         effectiveFrom: entry.effectiveFrom,
         effectiveTo: entry.effectiveTo ?? null,
         source: entry.source ?? 'manual',
-        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null
+        metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
       })
       .onConflictDoUpdate({
         target: [
@@ -273,7 +276,7 @@ export class MarketStructureRepository {
           feeScheduleTable.symbol,
           feeScheduleTable.productType,
           feeScheduleTable.tier,
-          feeScheduleTable.effectiveFrom
+          feeScheduleTable.effectiveFrom,
         ],
         set: {
           makerBps: entry.makerBps,
@@ -281,8 +284,8 @@ export class MarketStructureRepository {
           effectiveTo: entry.effectiveTo ?? null,
           source: entry.source ?? 'manual',
           metadata: entry.metadata ? JSON.stringify(entry.metadata) : null,
-          updatedAt: Math.floor(Date.now() / 1000)
-        }
+          updatedAt: Math.floor(Date.now() / 1000),
+        },
       });
   }
 
@@ -290,9 +293,17 @@ export class MarketStructureRepository {
     exchangeCode: string,
     symbol: string,
     productType: string,
-    asOfMs: number = Date.now()
+    asOfMs: number = Date.now(),
   ) {
-    const exchangeId = await this.getExchangeId(exchangeCode);
+    const [exchange] = await this.db
+      .select({ id: exchangeTable.id })
+      .from(exchangeTable)
+      .where(eq(exchangeTable.code, exchangeCode))
+      .limit(1);
+    if (!exchange) {
+      return null;
+    }
+    const exchangeId = exchange.id;
     const asOf = Math.floor(asOfMs / 1000);
     const rows = await this.db
       .select()
@@ -303,8 +314,8 @@ export class MarketStructureRepository {
           eq(feeScheduleTable.symbol, symbol.toUpperCase()),
           eq(feeScheduleTable.productType, productType),
           lte(feeScheduleTable.effectiveFrom, asOf),
-          or(isNull(feeScheduleTable.effectiveTo), gte(feeScheduleTable.effectiveTo, asOf))
-        )
+          or(isNull(feeScheduleTable.effectiveTo), gte(feeScheduleTable.effectiveTo, asOf)),
+        ),
       )
       .orderBy(desc(feeScheduleTable.effectiveFrom))
       .limit(1);
@@ -320,8 +331,8 @@ export class MarketStructureRepository {
           eq(feeScheduleTable.symbol, '*'),
           eq(feeScheduleTable.productType, productType),
           lte(feeScheduleTable.effectiveFrom, asOf),
-          or(isNull(feeScheduleTable.effectiveTo), gte(feeScheduleTable.effectiveTo, asOf))
-        )
+          or(isNull(feeScheduleTable.effectiveTo), gte(feeScheduleTable.effectiveTo, asOf)),
+        ),
       )
       .orderBy(desc(feeScheduleTable.effectiveFrom))
       .limit(1);

@@ -3,6 +3,8 @@ import { sideSchema, symbolSchema, timestampSchema, uuidSchema } from './primiti
 
 export interface Fill {
   id: string;
+  venueTradeId?: string;
+  venueOrderId?: string;
   orderId: string;
   t: number;
   symbol: string;
@@ -29,6 +31,8 @@ export interface PositionMark {
 
 export const fillSchema = z.object({
   id: uuidSchema,
+  venueTradeId: z.string().min(1).optional(),
+  venueOrderId: z.string().min(1).optional(),
   orderId: uuidSchema,
   t: timestampSchema,
   symbol: symbolSchema,

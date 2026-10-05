@@ -71,4 +71,36 @@ describe('wireFillAccounting', () => {
     expect(enqueue).not.toHaveBeenCalled();
     stop();
   });
+
+  it('derives stable ledger identities when a fill is redelivered', () => {
+    const fills$ = new Subject<Fill>();
+    const events: Array<{ id: string; dedupeKey?: string }> = [];
+    const stop = wireFillAccounting({
+      fills$,
+      baseAsset: 'BTC',
+      quoteAsset: 'USD',
+      accountId: 'ACC',
+      venue: 'paper',
+      clock: createManualClock(1),
+      enqueue: (event) => events.push(event),
+    });
+    const fill: Fill = {
+      id: crypto.randomUUID(),
+      orderId: crypto.randomUUID(),
+      t: 1,
+      symbol: 'BTCUSD',
+      px: 100,
+      qty: 1,
+      side: 'BUY',
+    };
+    fills$.next(fill);
+    fills$.next(fill);
+    expect(events.slice(0, 2).map((event) => event.id)).toEqual(
+      events.slice(2).map((event) => event.id),
+    );
+    expect(events.slice(0, 2).map((event) => event.dedupeKey)).toEqual(
+      events.slice(2).map((event) => event.dedupeKey),
+    );
+    stop();
+  });
 });

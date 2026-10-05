@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { SummaryTile } from './primitives/SummaryTile';
 import type { BacktestArtifact, BacktestHistoryEntry } from '../types';
 import { formatNumber, formatPercent } from '../lib/format';
@@ -56,7 +57,22 @@ export const BacktestPanel = ({ artifact, onArtifactChange, history }: BacktestP
                     {artifact.summary.events} events · {artifact.summary.ticksUsed} ticks
                   </p>
                 </div>
+                <Badge
+                  variant={artifact.integrity?.status === 'verified' ? 'outline' : 'destructive'}
+                  className={
+                    artifact.integrity?.status === 'verified'
+                      ? 'border-emerald-500/50 text-emerald-400'
+                      : undefined
+                  }
+                >
+                  {artifact.integrity?.status === 'verified' ? 'Integrity verified' : 'Unverified'}
+                </Badge>
               </div>
+              {artifact.integrity?.status === 'verified' && (
+                <p className="font-mono text-[9px] text-muted-foreground" title={artifact.integrity.fingerprints.eventChainSha256}>
+                  Chain {artifact.integrity.fingerprints.eventChainSha256.slice(0, 12)} · {artifact.integrity.checks.length}/{artifact.integrity.checks.length} checks
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <SummaryTile label="Sharpe" value={formatNumber(artifact.summary.sharpe, 3)} />
                 <SummaryTile
@@ -85,7 +101,14 @@ export const BacktestPanel = ({ artifact, onArtifactChange, history }: BacktestP
             <div key={entry.id} className="flex flex-col gap-1 rounded-sm border border-border/30 bg-card/30 p-2 hover:bg-card/50 transition-colors">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
                 <span className="font-mono">{new Date(entry.ts).toLocaleString()}</span>
-                <span className="font-medium text-foreground">{entry.summary?.symbol ?? '—'}</span>
+                <div className="flex items-center gap-2">
+                  {entry.integrity?.status === 'verified' && (
+                    <Badge variant="outline" className="border-emerald-500/50 text-emerald-400 px-1 py-0 text-[8px]">
+                      Verified
+                    </Badge>
+                  )}
+                  <span className="font-medium text-foreground">{entry.summary?.symbol ?? '—'}</span>
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2 text-[10px]">
                 <div className="flex flex-col">

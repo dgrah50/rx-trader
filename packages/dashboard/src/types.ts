@@ -8,19 +8,20 @@ import type {
   PortfolioAnalytics,
   PositionMark,
   TradeDirection as CoreTradeDirection,
-  TradesResponse as CoreTradesResponse
+  TradesResponse as CoreTradesResponse,
 } from '@rx-trader/core/domain';
-import type { FeedHealthSnapshot as PipelineFeedHealthSnapshot, StrategyTelemetrySnapshot } from '@rx-trader/pipeline';
+import type {
+  FeedHealthSnapshot as PipelineFeedHealthSnapshot,
+  StrategyTelemetrySnapshot,
+} from '@rx-trader/pipeline';
 import type { LogEntry as ObservabilityLogEntry } from '@rx-trader/observability';
 import type {
   BacktestArtifact as CoreBacktestArtifact,
-  BacktestSummary as CoreBacktestSummary,
-  BacktestStats as CoreBacktestStats
+  BacktestHistoryEntry as CoreBacktestHistoryEntry,
 } from '@rx-trader/backtest';
 
 export type StrategyRuntimeStatus = StrategyTelemetrySnapshot;
 export type StrategyMetrics = StrategyRuntimeStatus['metrics'];
-export type StrategyMarginInfo = NonNullable<StrategyRuntimeStatus['margin']>;
 
 export const createEmptyStrategyMetrics = (): StrategyMetrics => ({
   signals: 0,
@@ -32,7 +33,7 @@ export const createEmptyStrategyMetrics = (): StrategyMetrics => ({
   lastIntentTs: null,
   lastOrderTs: null,
   lastFillTs: null,
-  lastRejectTs: null
+  lastRejectTs: null,
 });
 
 export type PnlResponse = PortfolioAnalytics;
@@ -44,19 +45,10 @@ export type ClosedTrade = CoreClosedTrade;
 export type TradesResponse = CoreTradesResponse;
 export type LogEntry = ObservabilityLogEntry;
 export type BacktestArtifact = CoreBacktestArtifact;
-export interface BacktestHistoryEntry {
-  id: string;
-  ts: number;
-  summary: Partial<CoreBacktestSummary> | null;
-  stats?: Partial<CoreBacktestStats> | null;
-}
+export type BacktestHistoryEntry = CoreBacktestHistoryEntry;
 export type FeedHealthSnapshot = PipelineFeedHealthSnapshot;
-export interface BalanceEntry extends Omit<CoreBalanceEntry, 'venue'> {
-  venue: string;
-}
-export interface MarginSummary extends Omit<CoreMarginSummary, 'venue'> {
-  venue: string;
-}
+export type BalanceEntry = CoreBalanceEntry;
+export type MarginSummary = CoreMarginSummary;
 export type BalanceSyncTelemetry = CoreBalanceSyncTelemetry;
 export type EventMessage = DomainEvent;
 export type OrderEvent = DomainEvent;
@@ -78,20 +70,7 @@ export interface StatusResponse {
   runtime: {
     live: boolean;
     killSwitch: boolean;
-    strategy: {
-      type: string;
-      tradeSymbol: string;
-      primaryFeed: string;
-      extraFeeds: string[];
-      params: Record<string, unknown>;
-      fees?: {
-        makerBps: number;
-        takerBps: number;
-        source?: string;
-      };
-      margin?: StrategyMarginInfo;
-    } | null;
-    strategies?: StrategyRuntimeStatus[];
+    strategies: StrategyRuntimeStatus[];
   };
   persistence: {
     driver: string;

@@ -16,6 +16,43 @@ interface BinanceExchangeInfo {
   }>;
 }
 
+type BinanceSymbol = BinanceExchangeInfo['symbols'][number];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isOptionalNumber = (value: unknown): value is number | undefined =>
+  value === undefined || typeof value === 'number';
+
+const isBinanceFilter = (value: unknown): value is BinanceSymbol['filters'][number] =>
+  isRecord(value) &&
+  typeof value.filterType === 'string' &&
+  ['tickSize', 'stepSize', 'minQty', 'maxQty'].every(
+    (key) => value[key] === undefined || typeof value[key] === 'string'
+  );
+
+const isBinanceSymbol = (value: unknown): value is BinanceSymbol =>
+  isRecord(value) &&
+  typeof value.symbol === 'string' &&
+  typeof value.baseAsset === 'string' &&
+  typeof value.quoteAsset === 'string' &&
+  typeof value.baseAssetPrecision === 'number' &&
+  typeof value.quotePrecision === 'number' &&
+  isOptionalNumber(value.pricePrecision) &&
+  isOptionalNumber(value.quantityPrecision) &&
+  typeof value.status === 'string' &&
+  Array.isArray(value.filters) &&
+  value.filters.every(isBinanceFilter) &&
+  (value.permissions === undefined ||
+    (Array.isArray(value.permissions) && value.permissions.every((item) => typeof item === 'string')));
+
+const parseBinanceExchangeInfo = (value: unknown): BinanceExchangeInfo => {
+  if (!isRecord(value) || !Array.isArray(value.symbols) || !value.symbols.every(isBinanceSymbol)) {
+    throw new Error('Binance exchangeInfo response has an invalid shape');
+  }
+  return { symbols: value.symbols };
+};
+
 const defaultUrl = 'https://api.binance.com/api/v3/exchangeInfo';
 
 export const fetchBinanceMarketStructure = async (apiUrl: string = defaultUrl): Promise<MarketStructureSnapshotData> => {
@@ -23,7 +60,7 @@ export const fetchBinanceMarketStructure = async (apiUrl: string = defaultUrl): 
   if (!response.ok) {
     throw new Error(`Failed to fetch Binance exchangeInfo: ${response.status}`);
   }
-  const payload = (await response.json()) as BinanceExchangeInfo;
+  const payload = parseBinanceExchangeInfo(await response.json());
   const exchange = { code: 'binance', name: 'Binance' } as const;
 
   const seenCurrencies = new Set<string>();

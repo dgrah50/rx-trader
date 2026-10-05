@@ -1,10 +1,28 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": [
-    "scripts/**/*.ts",
-    "examples/**/*.ts",
-    "packages/event-store/src/persistenceWorker.ts"
-  ],
-  "ignore": ["packages/dashboard/**/*"],
-  "ignoreDependencies": ["pino-pretty"]
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/**/*.ts",
+        "examples/**/*.ts",
+        "packages/{backtest,config,control-plane,core,event-store,execution,feeds,observability,pipeline,portfolio,risk,strategies}/src/index.ts",
+        "packages/**/*.test.ts",
+        "packages/event-store/src/persistenceWorker.ts"
+      ],
+      "project": [
+        "packages/{backtest,config,control-plane,core,event-store,execution,feeds,observability,pipeline,portfolio,risk,strategies}/**/*.ts",
+        "scripts/**/*.ts",
+        "examples/**/*.ts"
+      ],
+      "ignoreDependencies": ["pino-pretty"]
+    },
+    "packages/market-structure": {
+      "entry": ["src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/dashboard": {
+      "entry": ["src/main.tsx"],
+      "project": ["src/**/*.{ts,tsx}"]
+    }
+  }
 }

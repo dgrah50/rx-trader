@@ -3,6 +3,7 @@ import { map, tap, filter } from 'rxjs/operators';
 import type { Observable } from 'rxjs';
 import type { OrderNew } from '@rx-trader/core/domain';
 import type { Clock } from '@rx-trader/core/time';
+import { deterministicUuid } from '@rx-trader/core/integrity';
 import { systemClock } from '@rx-trader/core/time';
 import type { AccountExposureGuard, RiskDecision } from '@rx-trader/risk/preTrade';
 import { splitRiskStream } from '@rx-trader/risk';
@@ -154,8 +155,10 @@ export const createStrategyOrchestrator = (
 
     const approvedOrders$ = budgetApproved$.pipe(
       tap((decision) => {
+        const dedupeKey = `risk.check:${decision.order.id}`;
         options.eventBus.emit({
-          id: crypto.randomUUID(),
+          id: deterministicUuid(`event:${dedupeKey}`),
+          dedupeKey,
           type: 'risk.check',
           data: {
             orderId: decision.order.id,
@@ -173,8 +176,10 @@ export const createStrategyOrchestrator = (
 
     const rejectsWithEvents$ = budgetRejected$.pipe(
       tap((decision) => {
+        const dedupeKey = `risk.check:${decision.order.id}`;
         options.eventBus.emit({
-          id: crypto.randomUUID(),
+          id: deterministicUuid(`event:${dedupeKey}`),
+          dedupeKey,
           type: 'risk.check',
           data: {
             orderId: decision.order.id,
@@ -237,17 +242,16 @@ const combineFeedManagers = (feedManagers: FeedManagerResult[]): FeedManagerResu
   }
   const marks$ = merge(...uniqueManagers.map((manager) => manager.marks$)).pipe(share());
   const sources = uniqueManagers.flatMap((manager) => manager.sources);
-  const debugFeeds = process.env.DEBUG_FEEDS === '1';
   const stop = () => {
+    let firstError: Error | undefined;
     uniqueManagers.forEach((manager) => {
       try {
         manager.stop();
       } catch (error) {
-        if (debugFeeds) {
-          console.warn('Failed to stop feed manager', error);
-        }
+        firstError ??= error instanceof Error ? error : new Error(String(error));
       }
     });
+    if (firstError) throw firstError;
   };
   return {
     marks$,

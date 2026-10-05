@@ -7,17 +7,21 @@ import {
   balancesProjection,
   marginProjection,
   buildProjection,
-  createEventStore
+  createEventStore,
+  type EventStore,
 } from '@rx-trader/event-store';
 import { orderNewSchema, type DomainEvent } from '@rx-trader/core/domain';
 import { safeParse } from '@rx-trader/core/validation';
 import type { Metrics } from '@rx-trader/observability/metrics';
 import { ExecutionVenue } from '@rx-trader/core/constants';
+import { detectExecutionVenue } from '@rx-trader/core/instruments';
 import { getFeedHealthSnapshots, type FeedHealthSnapshot } from '@rx-trader/pipeline/feedHealth';
 import type { BalanceSyncTelemetry } from '@rx-trader/portfolio/balances/types';
 import { planRebalance, flattenBalancesState, type RebalancePlan } from '@rx-trader/portfolio';
 import type { StrategyTelemetrySnapshot } from '@rx-trader/pipeline';
+import { verifyArtifactProof } from '@rx-trader/backtest';
 import type { BacktestArtifact, BacktestHistoryEntry } from '@rx-trader/backtest/types';
+import { deterministicUuid } from '@rx-trader/core/integrity';
 import type { RebalanceTelemetry } from '@rx-trader/portfolio/rebalancer/service';
 import { resolveStrategyMarginConfig } from './marginConfig';
 import {
@@ -25,35 +29,29 @@ import {
   BinanceMockGateway,
   HyperliquidMockGateway,
   BinanceRestGateway,
-  HyperliquidRestGateway,
   type ExecutionAdapter,
   type BinanceRestGatewayConfig,
-  type HyperliquidRestGatewayConfig
 } from '@rx-trader/execution';
 import { join, normalize, resolve } from 'node:path';
 import { buildTradeJournal } from './tradeJournal';
 
-const createExecutionAdapters = (config: AppConfig) => {
+const createExecutionAdapters = (config: AppConfig, live: boolean) => {
   const binanceConfig: BinanceRestGatewayConfig | undefined = config.venues?.binance;
-  const binanceAdapter: ExecutionAdapter = binanceConfig
+  const binanceAdapter: ExecutionAdapter | undefined = binanceConfig
     ? new BinanceRestGateway(binanceConfig)
-    : new BinanceMockGateway();
-
-  // Only construct the real Hyperliquid REST adapter when API creds are present.
-  const hyperRaw = config.venues?.hyperliquid as
-    | (HyperliquidRestGatewayConfig & { walletAddress?: string; subaccount?: number })
-    | undefined;
-  const hyperliquidAdapter: ExecutionAdapter =
-    hyperRaw && typeof hyperRaw.apiKey === 'string' && typeof hyperRaw.apiSecret === 'string'
-      ? new HyperliquidRestGateway(hyperRaw)
-      : new HyperliquidMockGateway();
+    : live
+      ? undefined
+      : new BinanceMockGateway();
+  const hyperliquidAdapter: ExecutionAdapter | undefined = live
+    ? undefined
+    : new HyperliquidMockGateway();
 
   const paperAdapter: ExecutionAdapter = new PaperExecutionAdapter(ExecutionVenue.Paper);
 
   return {
     [ExecutionVenue.Paper]: paperAdapter,
     [ExecutionVenue.Binance]: binanceAdapter,
-    [ExecutionVenue.Hyperliquid]: hyperliquidAdapter
+    [ExecutionVenue.Hyperliquid]: hyperliquidAdapter,
   };
 };
 
@@ -74,7 +72,7 @@ interface AccountingTelemetry {
   rebalancer?: () => RebalanceTelemetry | null | undefined;
 }
 
-type BacktestArtifactHistoryData = Pick<BacktestHistoryEntry, 'summary' | 'stats'>;
+type BacktestArtifactHistoryData = Pick<BacktestHistoryEntry, 'summary' | 'stats' | 'integrity'>;
 
 const clampHistoryLimit = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return 10;
@@ -91,15 +89,12 @@ const emptyStrategyMetrics = (): StrategyRuntimeStatus['metrics'] => ({
   lastIntentTs: null,
   lastOrderTs: null,
   lastFillTs: null,
-  lastRejectTs: null
+  lastRejectTs: null,
 });
 
 const feedToVenue = (feed?: string | null) => {
   const lower = (feed ?? '').toLowerCase();
-  if (lower.includes('binance')) return 'binance';
-  if (lower.includes('hyperliquid')) return 'hyperliquid';
-  if (lower.includes('paper')) return 'paper';
-  return lower || 'paper';
+  return detectExecutionVenue(feed) ?? (lower || 'paper');
 };
 
 const buildSymbolVenueMap = (config: AppConfig) => {
@@ -114,18 +109,17 @@ const buildSymbolVenueMap = (config: AppConfig) => {
   return map;
 };
 
-
 const emptyExitMetrics = (): StrategyRuntimeStatus['exits'] => ({
   total: 0,
   byReason: {},
   lastReason: null,
-  lastTs: null
+  lastTs: null,
 });
 
 const normalizeStrategyStatus = (
   definition: AppConfig['strategies'][number],
   fees: { makerBps: number; takerBps: number; source: string },
-  config: AppConfig
+  config: AppConfig,
 ): StrategyRuntimeStatus => ({
   id: definition.id,
   type: definition.type,
@@ -139,12 +133,12 @@ const normalizeStrategyStatus = (
   fees,
   margin: resolveStrategyMarginConfig(definition, config),
   metrics: emptyStrategyMetrics(),
-  exits: emptyExitMetrics()
+  exits: emptyExitMetrics(),
 });
 
 const readBacktestHistory = async (
-  store: Awaited<ReturnType<typeof createEventStore>>,
-  limit: number
+  store: EventStore,
+  limit: number,
 ): Promise<BacktestHistoryEntry[]> => {
   const events = await store.read();
   return events
@@ -155,22 +149,20 @@ const readBacktestHistory = async (
       id: event.id,
       ts: event.ts,
       summary: (event.data as BacktestArtifactHistoryData | undefined)?.summary ?? null,
-      stats: (event.data as BacktestArtifactHistoryData | undefined)?.stats ?? null
+      stats: (event.data as BacktestArtifactHistoryData | undefined)?.stats ?? null,
+      integrity: (event.data as BacktestArtifactHistoryData | undefined)?.integrity ?? null,
     }));
 };
 
 export interface GatewayOptions {
-  store?: Awaited<ReturnType<typeof createEventStore>>;
+  store?: EventStore;
   logger?: ReturnType<typeof createLogger>;
   metrics?: ReturnType<typeof createMetrics>;
   runtimeMeta?: RuntimeMeta;
   accounting?: AccountingTelemetry;
 }
 
-const readRecentOrders = async (
-  store: Awaited<ReturnType<typeof createEventStore>>,
-  limit: number
-) => {
+const readRecentOrders = async (store: EventStore, limit: number) => {
   const events = await store.read();
   return events
     .filter((event) => event.type.startsWith('order.') || event.type === 'risk.check')
@@ -179,14 +171,9 @@ const readRecentOrders = async (
     .map((event) => ({ id: event.id, type: event.type, ts: event.ts, data: event.data }));
 };
 
-const readRecentEvents = async (
-  store: Awaited<ReturnType<typeof createEventStore>>,
-  limit: number
-) => {
+const readRecentEvents = async (store: EventStore, limit: number) => {
   const events = await store.read();
-  return events
-    .sort((a, b) => b.ts - a.ts)
-    .slice(0, clampHistoryLimit(limit));
+  return events.sort((a, b) => b.ts - a.ts).slice(0, clampHistoryLimit(limit));
 };
 
 const getClientKey = (request: Request) =>
@@ -194,7 +181,7 @@ const getClientKey = (request: Request) =>
 
 export const createControlPlaneRouter = async (
   config: AppConfig = loadConfig(),
-  options: GatewayOptions = {}
+  options: GatewayOptions = {},
 ) => {
   const logger = options.logger ?? createLogger('gateway');
   const metrics: Metrics = options.metrics ?? createMetrics();
@@ -215,12 +202,13 @@ export const createControlPlaneRouter = async (
     ? resolve(config.controlPlane.dashboard.distDir)
     : null;
 
-  const executionAdapters = createExecutionAdapters(config);
+  const executionAdapters = createExecutionAdapters(config, Boolean(runtimeMeta.live));
   let lastBacktestArtifact: BacktestArtifact | null = null;
   let lastEventTs: number | null = null;
   let lastLogTs: number | null = null;
 
   Object.values(executionAdapters).forEach((adapter) => {
+    if (!adapter) return;
     adapter.events$.subscribe(async (event) => {
       await store.append(event);
     });
@@ -254,31 +242,31 @@ export const createControlPlaneRouter = async (
   });
   logStream$.subscribe((entry) => publishLog(entry));
 
-const json = (body: unknown, init: ResponseInit = {}) => {
-  const headers = new Headers(init.headers ?? {});
-  headers.set('content-type', 'application/json');
-  headers.set('access-control-allow-origin', '*');
-  headers.set('access-control-allow-methods', 'GET,POST,OPTIONS');
-  headers.set('access-control-allow-headers', 'content-type,authorization');
-  return new Response(JSON.stringify(body, null, 2), {
-    ...init,
-    headers
-  });
-};
+  const json = (body: unknown, init: ResponseInit = {}) => {
+    const headers = new Headers(init.headers ?? {});
+    headers.set('content-type', 'application/json');
+    headers.set('access-control-allow-origin', '*');
+    headers.set('access-control-allow-methods', 'GET,POST,OPTIONS');
+    headers.set('access-control-allow-headers', 'content-type,authorization');
+    return new Response(JSON.stringify(body, null, 2), {
+      ...init,
+      headers,
+    });
+  };
 
-const withCors = (response: Response) => {
-  response.headers.set('access-control-allow-origin', '*');
-  response.headers.set('access-control-allow-methods', 'GET,POST,OPTIONS');
-  response.headers.set('access-control-allow-headers', 'content-type,authorization');
-  return response;
-};
+  const withCors = (response: Response) => {
+    response.headers.set('access-control-allow-origin', '*');
+    response.headers.set('access-control-allow-methods', 'GET,POST,OPTIONS');
+    response.headers.set('access-control-allow-headers', 'content-type,authorization');
+    return response;
+  };
 
-const handleCorsPreflight = (request: Request) => {
-  if (request.method === 'OPTIONS') {
-    return withCors(new Response(null, { status: 204 }));
-  }
-  return null;
-};
+  const handleCorsPreflight = (request: Request) => {
+    if (request.method === 'OPTIONS') {
+      return withCors(new Response(null, { status: 204 }));
+    }
+    return null;
+  };
 
   const enforceAuth = (request: Request) => {
     if (!authToken) return null;
@@ -302,7 +290,7 @@ const handleCorsPreflight = (request: Request) => {
       const retryAfter = Math.max(0, Math.ceil((bucket.reset - now) / 1000));
       return json(
         { error: 'rate limit exceeded' },
-        { status: 429, headers: { 'retry-after': String(retryAfter) } }
+        { status: 429, headers: { 'retry-after': String(retryAfter) } },
       );
     }
     bucket.count += 1;
@@ -330,12 +318,16 @@ const handleCorsPreflight = (request: Request) => {
     const filePath = join(dashboardRoot, targetPath);
     const file = Bun.file(filePath);
     if (await file.exists()) {
-      return withCors(new Response(file, { headers: { 'content-type': file.type || 'text/plain' } }));
+      return withCors(
+        new Response(file, { headers: { 'content-type': file.type || 'text/plain' } }),
+      );
     }
     if (targetPath !== 'index.html') {
       const fallback = Bun.file(join(dashboardRoot, 'index.html'));
       if (await fallback.exists()) {
-          return withCors(new Response(fallback, { headers: { 'content-type': fallback.type || 'text/html' } }));
+        return withCors(
+          new Response(fallback, { headers: { 'content-type': fallback.type || 'text/html' } }),
+        );
       }
     }
     return null;
@@ -352,11 +344,11 @@ const handleCorsPreflight = (request: Request) => {
     const { open, closed } = buildTradeJournal(events, positionsState.positions ?? {});
     const annotate = <T extends { symbol: string }>(trade: T) => ({
       ...trade,
-      venue: symbolVenues.get(trade.symbol.toUpperCase()) ?? 'paper'
+      venue: symbolVenues.get(trade.symbol.toUpperCase()) ?? 'paper',
     });
     return json({
       open: open.map(annotate),
-      closed: closed.map(annotate)
+      closed: closed.map(annotate),
     });
   };
 
@@ -374,7 +366,7 @@ const handleCorsPreflight = (request: Request) => {
     const state = await buildProjection(store, balancesProjection);
     return json({
       balances: state.balances,
-      updated: state.updatedAt ?? null
+      updated: state.updatedAt ?? null,
     });
   };
 
@@ -382,7 +374,7 @@ const handleCorsPreflight = (request: Request) => {
     const state = await buildProjection(store, marginProjection);
     return json({
       summaries: state.summaries,
-      updated: state.updatedAt ?? null
+      updated: state.updatedAt ?? null,
     });
   };
 
@@ -390,7 +382,7 @@ const handleCorsPreflight = (request: Request) => {
     const [balancesState, marginState, pnlSnapshot] = await Promise.all([
       buildProjection(store, balancesProjection),
       buildProjection(store, marginProjection),
-      readPnlSnapshot()
+      readPnlSnapshot(),
     ]);
     return json({
       timestamp: Date.now(),
@@ -404,8 +396,8 @@ const handleCorsPreflight = (request: Request) => {
       updated: {
         balances: balancesState.updatedAt ?? null,
         margin: marginState.updatedAt ?? null,
-        pnl: pnlSnapshot?.t ?? null
-      }
+        pnl: pnlSnapshot?.t ?? null,
+      },
     });
   };
 
@@ -426,27 +418,15 @@ const handleCorsPreflight = (request: Request) => {
     const defaultFeeTier = {
       makerBps: config.execution.policy.makerFeeBps,
       takerBps: config.execution.policy.takerFeeBps,
-      source: 'config'
+      source: 'config',
     };
     const strategySource: StrategyStatusSource =
       runtimeMeta.strategies ??
       (config.strategies ?? []).map((definition) =>
-        normalizeStrategyStatus(definition, defaultFeeTier, config)
+        normalizeStrategyStatus(definition, defaultFeeTier, config),
       );
     const strategyStatuses =
       typeof strategySource === 'function' ? strategySource() : strategySource;
-    const primaryStrategySource = strategyStatuses[0] ?? null;
-    const primaryStrategy = primaryStrategySource
-      ? {
-          type: primaryStrategySource.type,
-          tradeSymbol: primaryStrategySource.tradeSymbol,
-          primaryFeed: primaryStrategySource.primaryFeed,
-          extraFeeds: primaryStrategySource.extraFeeds,
-          params: primaryStrategySource.params ?? {},
-          fees: primaryStrategySource.fees,
-          margin: primaryStrategySource.margin
-        }
-      : null;
 
     return {
       timestamp: Date.now(),
@@ -455,13 +435,12 @@ const handleCorsPreflight = (request: Request) => {
       runtime: {
         live: Boolean(runtimeMeta.live),
         killSwitch,
-        strategy: primaryStrategy,
-        strategies: strategyStatuses
+        strategies: strategyStatuses,
       },
       persistence: {
         driver: config.persistence.driver,
         sqlitePath:
-          config.persistence.driver === 'sqlite' ? config.persistence.sqlitePath : undefined
+          config.persistence.driver === 'sqlite' ? config.persistence.sqlitePath : undefined,
       },
       feeds,
       metrics: {
@@ -474,22 +453,24 @@ const handleCorsPreflight = (request: Request) => {
         eventSubscribers: subscribers.size,
         logSubscribers: logSubscribers.size,
         lastEventTs,
-        lastLogTs
+        lastLogTs,
       },
       accounting: {
         balanceSync,
-        rebalancer: rebalancerTelemetryFn()
-      }
+        rebalancer: rebalancerTelemetryFn(),
+      },
     };
   };
 
   const appendNewOrder = async (payload: unknown) => {
     const order = safeParse(orderNewSchema, payload);
+    const dedupeKey = `order.new:${order.account}:${order.id}`;
     await store.append({
-      id: crypto.randomUUID(),
+      id: deterministicUuid(`event:${dedupeKey}`),
+      dedupeKey,
       type: 'order.new',
       data: order,
-      ts: Date.now()
+      ts: Date.now(),
     });
     metrics.ordersSubmitted.inc();
     return order;
@@ -509,7 +490,7 @@ const handleCorsPreflight = (request: Request) => {
     }
     const adapter = executionAdapters[venue];
     if (!adapter) {
-      return json({ error: `Unknown venue ${venue}` }, { status: 404 });
+      return json({ error: `Execution unavailable for venue ${venue}` }, { status: 501 });
     }
     const order = await appendNewOrder(await request.json());
     await adapter.submit(order);
@@ -526,8 +507,8 @@ const handleCorsPreflight = (request: Request) => {
   const handleMetrics = async () => {
     return withCors(
       new Response(await metrics.register.metrics(), {
-        headers: { 'content-type': metrics.register.contentType }
-      })
+        headers: { 'content-type': metrics.register.contentType },
+      }),
     );
   };
 
@@ -536,7 +517,7 @@ const handleCorsPreflight = (request: Request) => {
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache',
     connection: 'keep-alive',
-    'x-accel-buffering': 'no'
+    'x-accel-buffering': 'no',
   };
 
   const handleEventStream = () => {
@@ -560,7 +541,7 @@ const handleCorsPreflight = (request: Request) => {
         if (heartbeat) {
           clearInterval(heartbeat);
         }
-      }
+      },
     });
     return withCors(new Response(stream, { headers: sseHeaders }));
   };
@@ -586,7 +567,7 @@ const handleCorsPreflight = (request: Request) => {
         if (heartbeat) {
           clearInterval(heartbeat);
         }
-      }
+      },
     });
     return withCors(new Response(stream, { headers: sseHeaders }));
   };
@@ -636,13 +617,17 @@ const handleCorsPreflight = (request: Request) => {
       return json(lastBacktestArtifact ?? null);
     }
     if (url.pathname === '/backtest/artifacts' && request.method === 'POST') {
-      const body = await request.json();
+      const body = (await request.json()) as BacktestArtifact;
+      const integrityFailures = verifyArtifactProof(body);
+      if (integrityFailures.length > 0) {
+        return json({ ok: false, integrityFailures }, { status: 422 });
+      }
       lastBacktestArtifact = body;
       await store.append({
         id: crypto.randomUUID(),
         type: 'backtest.artifact',
         data: body,
-        ts: Date.now()
+        ts: Date.now(),
       });
       return json({ ok: true });
     }
